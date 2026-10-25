@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+**/.next
+.venv
+.env
+.env.*
+!.env.example
+.git
+data
+**/__pycache__
+**/.pytest_cache
+**/*.egg-info
+**/*.tsbuildinfo
+.openai

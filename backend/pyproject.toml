@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evhunter-backend"
+version = "0.1.0"
+description = "Single-owner odds analysis, arbitrage and bet tracking"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi==0.162.0",
+  "uvicorn[standard]>=0.35,<1",
+  "sqlalchemy>=2.0.40,<3",
+  "psycopg[binary]>=3.2,<4",
+  "redis>=5.2,<7",
+  "httpx>=0.28,<1",
+  "pydantic-settings>=2.8,<3",
+  "itsdangerous>=2.2,<3"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<10"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["evhunter*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -1,0 +1,19 @@
+{
+  "name": "evhunter",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:web": "npm run dev --workspace @evhunter/web",
+    "build": "npm run build --workspace @evhunter/web",
+    "typecheck": "npm run typecheck --workspace @evhunter/web",
+    "test": "python -m pytest backend/tests -q",
+    "setup": "node scripts/setup.mjs"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
