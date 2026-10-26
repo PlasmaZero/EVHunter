@@ -1,4 +1,5 @@
 import asyncio
+import time
 import csv
 import hashlib
 import hmac
@@ -10,7 +11,7 @@ from datetime import timedelta
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select, text
 from starlette.middleware.sessions import SessionMiddleware
@@ -107,7 +108,7 @@ class CashInput(Input):
 
 class MappingInput(Input):
     market_id: str = Field(pattern=r"^[a-f0-9]{24}$")
-    source: Literal["kalshi", "polymarket_us", "polymarket"]
+    source: Literal["kalshi", "polymarket_us", "polymarket", "novig"]
     external_id: str = Field(min_length=1, max_length=200, pattern=r"^[a-zA-Z0-9_-]+$")
     yes_outcome: str = Field(min_length=1, max_length=120)
     token_ids: list[str] = Field(default_factory=list, max_length=2)
@@ -121,6 +122,8 @@ class MappingInput(Input):
     def check(self):
         if not self.rules_verified or not self.fees_reviewed:
             raise ValueError("Review matching settlement rules and the current fee schedule first")
+        if self.source == "novig" and (len(self.token_ids) != 2 or len(set(self.token_ids)) != 2 or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", t) for t in self.token_ids)):
+            raise ValueError("Two distinct Novig outcome IDs in YES/NO order are required")
         if self.source == "polymarket" and (len(self.token_ids) != 2 or len(set(self.token_ids)) != 2 or any(not t.isdigit() or len(t) > 100 for t in self.token_ids)):
             raise ValueError("Two distinct outcome token IDs are required")
         if self.fee_model == "none" and self.fee_rate != 0:
@@ -227,8 +230,39 @@ def create_app(config: Config | None = None):
             worker = session.get(SourceState, f"{config.data_mode}:worker")
             return {"opportunities": opportunities, "counts": counts, "bankroll": bankroll(session, config.data_mode),
                     "preferences": preferences(session, config.data_mode), "books": BOOKS,
-                    "mode": config.data_mode, "as_of": utcnow().isoformat(),
+                    "mode": config.data_mode, "as_of": utcnow().isoformat(), "streaming": config.data_mode == "live" and bool(config.stream_sources),
                     "worker": worker.data if worker else {"status": "starting"}}
+
+    @app.get("/api/stream", dependencies=[Depends(require_owner)])
+    async def live_updates(request: Request):
+        async def events():
+            pubsub = None
+            try:
+                if app.state.cache.redis:
+                    pubsub = app.state.cache.redis.pubsub(ignore_subscribe_messages=True)
+                    await asyncio.to_thread(pubsub.subscribe, f"evhunter:{config.data_mode}:updates")
+                yield "event: ready\ndata: connected\n\n"
+                started, heartbeat_at = time.monotonic(), time.monotonic()
+                while time.monotonic()-started < 25 and not await request.is_disconnected():
+                    if pubsub:
+                        message = await asyncio.to_thread(pubsub.get_message, timeout=1.0)
+                        if message:
+                            yield "event: quotes\ndata: updated\n\n"
+                    else:
+                        await asyncio.sleep(1)
+                        yield "event: quotes\ndata: refresh\n\n"
+                    if time.monotonic()-heartbeat_at >= 10:
+                        yield ": heartbeat\n\n"
+                        heartbeat_at = time.monotonic()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                yield "event: unavailable\ndata: polling fallback\n\n"
+            finally:
+                if pubsub:
+                    with suppress(Exception):
+                        await asyncio.to_thread(pubsub.close)
+        return StreamingResponse(events(), media_type="text/event-stream", headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
 
     @app.get("/api/history/{market_id}", dependencies=[Depends(require_owner)])
     def history(market_id: str):
@@ -375,7 +409,7 @@ def create_app(config: Config | None = None):
             return {"mode": config.data_mode, "states": states, "books": BOOKS, "quote_counts": counts, "mappings": maps,
                     "poll_seconds": config.poll_seconds, "prediction_poll_seconds": config.prediction_poll_seconds,
                     "monthly_credit_budget": config.monthly_credit_budget, "smtp_configured": bool(config.smtp_host),
-                    "reviewed_books": config.reviewed_books.split(",")}
+                    "reviewed_books": config.reviewed_books.split(","), "stream_sources": config.stream_sources}
 
     @app.get("/api/markets", dependencies=[Depends(require_owner)])
     def markets():

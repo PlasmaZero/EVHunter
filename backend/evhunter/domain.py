@@ -55,6 +55,8 @@ class Quote(BaseModel):
     max_stake: float | None = Field(default=None, gt=0)
     contracts: float | None = Field(default=None, gt=0)
     share_price: float | None = Field(default=None, gt=0, lt=1)
+    contract_payout: float = Field(default=1, gt=0, le=1)
+    feed: Literal["odds_api", "direct", "demo"] = "odds_api"
     fee_model: Literal["none", "profit", "curve", "per_contract", "unknown"] = "none"
     fee_rate: float = Field(default=0, ge=0, le=1)
     fee_exponent: float = Field(default=1, ge=1, le=5)
@@ -70,7 +72,7 @@ class Quote(BaseModel):
             raise ValueError("Selection must belong to the outcome set")
         if self.market != "moneyline" and self.line is None:
             raise ValueError("Spread and total markets require an exact line")
-        if self.share_price is not None and abs(self.odds - 1 / self.share_price) > 0.001:
+        if self.share_price is not None and abs(self.odds - self.contract_payout / self.share_price) > 0.001:
             raise ValueError("Contract price and decimal odds disagree")
         for field in ("starts_at", "source_at", "received_at"):
             setattr(self, field, as_utc(getattr(self, field)))

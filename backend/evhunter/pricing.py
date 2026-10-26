@@ -83,7 +83,7 @@ def fee_for_contracts(q: Quote, count: int) -> float:
     if a is None or q.fee_model == "unknown":
         raise ValueError("Verified contract price and fees are required")
     if q.fee_model == "curve":
-        return money(q.fee_rate * count * (a * (1-a)) ** q.fee_exponent, up=True)
+        return money(q.fee_rate * count * ((a/q.contract_payout) * (1-a/q.contract_payout)) ** q.fee_exponent * q.contract_payout, up=True)
     if q.fee_model == "per_contract":
         return money(q.fee_rate * count, up=True)
     if q.fee_model == "none":
@@ -96,17 +96,17 @@ def effective_odds(q: Quote) -> float:
         return 0
     if q.share_price is not None:
         # Continuous approximation only for ranking/sizing. Actual fills use rounded fees below.
-        fee = q.fee_rate * (q.share_price * (1-q.share_price)) ** q.fee_exponent if q.fee_model == "curve" else q.fee_rate if q.fee_model == "per_contract" else 0
-        return 1 / (q.share_price + fee)
+        fee = q.fee_rate * ((q.share_price/q.contract_payout) * (1-q.share_price/q.contract_payout)) ** q.fee_exponent * q.contract_payout if q.fee_model == "curve" else q.fee_rate if q.fee_model == "per_contract" else 0
+        return q.contract_payout / (q.share_price + fee)
     return 1 + (q.odds - 1) * (1 - q.fee_rate) if q.fee_model == "profit" else q.odds
 
 
 def position_for_return(q: Quote, target: float) -> dict:
     if q.share_price is not None:
-        units = math.ceil(target - 1e-9)
+        units = math.ceil(target/q.contract_payout - 1e-9)
         fee = fee_for_contracts(q, units)
         stake = money(units * q.share_price + fee, up=True)
-        payout = float(units)
+        payout = round(units*q.contract_payout, 8)
     else:
         units = None
         stake = money(target / effective_odds(q), up=True)

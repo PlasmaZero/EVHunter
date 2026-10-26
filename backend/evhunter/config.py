@@ -30,6 +30,13 @@ class Config(BaseSettings):
     kalshi_base_url: str = "https://external-api.kalshi.com/trade-api/v2"
     polymarket_base_url: str = "https://clob.polymarket.com"
     polymarket_us_base_url: str = "https://gateway.polymarket.us"
+    prediction_streams: str = ""
+    kalshi_api_key_id: str = ""
+    kalshi_private_key_path: str = ""
+    polymarket_us_key_id: str = ""
+    polymarket_us_secret_key: str = ""
+    novig_key_id: str = ""
+    novig_private_key_path: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -38,6 +45,13 @@ class Config(BaseSettings):
     smtp_starttls: bool = True
     smtp_ssl: bool = False
     history_retention_days: int = Field(default=30, ge=1, le=365)
+
+    @property
+    def stream_sources(self) -> list[str]:
+        sources = [v.strip() for v in self.prediction_streams.split(",") if v.strip()]
+        if set(sources) - {"kalshi", "polymarket", "polymarket_us", "novig"}:
+            raise ValueError("Unsupported prediction stream")
+        return list(dict.fromkeys(sources))
 
     @property
     def origins(self) -> list[str]:

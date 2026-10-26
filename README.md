@@ -117,9 +117,9 @@ After sportsbook markets are ingested, open **Data sources → Map a market**. S
 
 For international Polymarket, enter the condition ID and the YES/NO token IDs. The adapter verifies the order books' condition IDs when supplied. For US books, a suspended or non-open state is excluded. Kalshi snapshots must refer to an active market.
 
-Direct adapters poll at 20 seconds by default. They intentionally use top-of-book available size and whole-contract quantities. When a venue does not provide a source timestamp, the quote explicitly records a snapshot-receipt timestamp basis. Those timestamps are not represented as venue-originated updates.
+Direct REST adapters poll at 20 seconds by default; optional direct streams are described below. They intentionally use top-of-book available size and whole-contract quantities. When a venue does not provide a source timestamp, the quote explicitly records a snapshot-receipt timestamp basis. Those timestamps are not represented as venue-originated updates.
 
-The MVP limits each prediction venue to 20 reviewed mappings. Higher-throughput discovery, streaming connections, and deeper-book optimization are phase-2 work.
+The MVP limits each prediction venue to 20 reviewed mappings. Higher-throughput discovery and deeper-book optimization are phase-2 work.
 
 ### 3. Set your strategy
 
@@ -130,6 +130,39 @@ A complete reference outcome set is required. If its price is missing, stale, or
 ### 4. Email alerts
 
 Set the SMTP variables in `.env`, then enable email alerts and enter your own recipient address in Settings. SMTP credentials are never returned to the browser. SMTP delivery is disabled in demo mode. Alerts are queued, deduplicated for ten minutes, retried with bounded backoff, and discarded when their underlying quotes expire.
+
+## Optional direct real-time feeds
+
+Direct WebSocket adapters are implemented for **Kalshi, Polymarket US, Polymarket international, and Novig**. The three sportsbook defaults stay unchanged. Streaming is disabled until you opt in and add reviewed market mappings.
+
+After pulling updates, run `npm run setup` to install the signing dependency, then configure only the sources you want:
+
+```dotenv
+PREDICTION_STREAMS=kalshi,polymarket_us,novig
+KALSHI_API_KEY_ID=
+KALSHI_PRIVATE_KEY_PATH=
+POLYMARKET_US_KEY_ID=
+POLYMARKET_US_SECRET_KEY=
+NOVIG_KEY_ID=
+NOVIG_PRIVATE_KEY_PATH=
+```
+
+Use local paths to downloaded API signing keys, kept outside the repository. Polymarket US uses its API secret key in base64. These are service API signing credentials, never a wallet seed phrase. Keys remain on the worker and are never returned to the browser.
+
+- **Kalshi:** public REST reads require no key; its WebSocket handshake requires an account API key and an RSA or Ed25519 signing key.
+- **Polymarket US:** public REST reads need no key; its market WebSocket requires account API credentials.
+- **Polymarket international:** public market WebSockets use no account key. Add `polymarket` to `PREDICTION_STREAMS` to stream reviewed outcome tokens. It stays reference-only in this US-focused app.
+- **Novig:** the direct V3 WebSocket requires an eligible production account and a trading read key (`trading::read`). Create and register that key through Novig's documented account setup. The connector only sends market-data subscriptions. It does not open or fund subaccounts, place orders, or bypass device/location checks. Paper keys are not accepted by this production connector.
+
+In **Data sources → Map a market**, link the contract to an existing ingested binary market. Novig requires its market ID and the two outcome IDs in YES/NO order. Review settlement and fees before saving. The initial linking workflow still starts from ingested sportsbook events; standalone prediction-only discovery is not implemented.
+
+The worker maintains books from snapshots and deltas, reconnects with backoff, rejects sequence gaps, and invalidates disconnected books. Quotes and alerts are batched at most twice per second. The browser receives server-sent update notifications; its five-second polling remains a fallback. Status cards distinguish polling, active streams, missing credentials, and reconnects.
+
+Novig's V3 contracts pay **$0.01**, compared with **$1** for the supported Kalshi/Polymarket binary contracts. The engine scales returns, depth, and curve fees to the actual contract payout. Fees round conservatively to cents, which can exclude very small trades. Do not copy a $1-contract fee or share calculation onto Novig.
+
+Data-access costs are separate from trading fees, infrastructure bills, and data-use rights. Kalshi/Polymarket expose public reads; authenticated streaming needs eligible accounts. Novig's documentation describes authenticated access and throttling rather than a guaranteed universally free data license. Verify its account and commercial-use terms.
+
+References: [Kalshi streams](https://docs.kalshi.com/getting_started/quick_start_websockets), [Polymarket US streams](https://docs.polymarket.us/api-reference/websocket/markets), [Polymarket market stream](https://docs.polymarket.com/market-data/realtime-data), [Novig API](https://docs.novig.com/), [Novig stream](https://docs.novig.com/api/streaming/connection), [Novig fees and penny payouts](https://docs.novig.com/api/concepts/fees).
 
 ## Pricing and matching rules
 
@@ -233,7 +266,7 @@ Primary references: [NY Gaming Commission](https://gaming.ny.gov/sports-wagering
 
 ## Phase 2
 
-Player props and alternate lines; ties/pushes and more complex settlement payoffs; broader sports coverage; source WebSockets and a premium push-feed adapter; deeper-book optimization; closing-line value and probability calibration; automated grading and imports; browser push; portfolio correlation/exposure limits; versioned database migrations; stronger identity-provider authentication and multi-user tenancy.
+Player props and alternate lines; ties/pushes and more complex settlement payoffs; broader sports coverage; a premium sportsbook push-feed adapter; deeper-book optimization; closing-line value and probability calibration; automated grading and imports; browser push; portfolio correlation/exposure limits; versioned database migrations; stronger identity-provider authentication and multi-user tenancy.
 
 ## Repository layout
 

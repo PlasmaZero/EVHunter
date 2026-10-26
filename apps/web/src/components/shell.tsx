@@ -41,6 +41,19 @@ export default function Shell({ children }: { children: React.ReactNode }) {
     return () => { alive = false; };
   }, [refresh, router]);
   useEffect(() => { if (!user) return; const t = setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, 5000); return () => clearInterval(t); }, [user, refresh]);
+  useEffect(() => {
+    if (!user || !data?.streaming) return;
+    const stream = new EventSource("/api/stream");
+    let refreshed = 0;
+    const onQuote = () => {
+      if (document.visibilityState === "visible" && Date.now()-refreshed >= 500) {
+        refreshed = Date.now();
+        void refresh();
+      }
+    };
+    stream.addEventListener("quotes", onQuote);
+    return () => { stream.removeEventListener("quotes", onQuote); stream.close(); };
+  }, [user, data?.streaming, refresh]);
   useEffect(() => { const update = () => setTime(new Date().toLocaleTimeString("en-GB", { timeZone: "UTC" })); update(); const t = setInterval(update, 1000); return () => clearInterval(t); }, []);
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(""), 4000); return () => clearTimeout(t); }, [toast]);
   useEffect(() => { setMenu(false); }, [path]);

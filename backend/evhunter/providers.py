@@ -142,19 +142,28 @@ async def collect_prediction(client, config, mapping: dict, exemplar: Quote):
             stamp, basis = min(timestamps), "source"
     else:
         raise ProviderError("Unsupported prediction venue")
+    return make_prediction_quotes(mapping, exemplar, books, stamp, basis)
+
+
+def make_prediction_quotes(mapping, exemplar, books, stamp, basis="source"):
+    source = mapping["source"]
+    now = utcnow()
+    payout = .01 if source == "novig" else 1.0
     yes = mapping["yes_outcome"]
     no = next(o for o in exemplar.outcomes if o != yes)
     quotes = []
-    for outcome, levels in zip([yes, no], books):
-        if not levels:
+    for outcome, ladder in zip([yes, no], books):
+        if not ladder:
             continue
-        price, size = levels[0]
+        price, size = ladder[0]
         if not 0 < price < 1 or size < 1:
             continue
         selection = (f"{'Over' if outcome == 'over' else 'Under'} {exemplar.line}" if exemplar.market == "total" else
                      f"{outcome} {exemplar.line if outcome == exemplar.home else -exemplar.line:+g}" if exemplar.market == "spread" else outcome)
-        quotes.append(exemplar.model_copy(update={"book": source, "outcome": outcome, "selection": selection,
-            "odds": 1/price, "share_price": price, "contracts": size, "max_stake": None,
+        values = {**exemplar.model_dump(), "book": source, "outcome": outcome, "selection": selection,
+            "odds": 1/price, "share_price": price*payout, "contract_payout": payout, "contracts": size, "max_stake": None,
             "fee_model": mapping["fee_model"], "fee_rate": mapping["fee_rate"], "fee_exponent": mapping.get("fee_exponent", 1),
-            "source_at": stamp, "timestamp_basis": basis, "received_at": now, "rules_verified": True, "is_demo": False}))
+            "source_at": stamp, "timestamp_basis": basis, "received_at": now, "rules_verified": True,
+            "is_demo": False, "feed": "direct", "status": "open"}
+        quotes.append(Quote.model_validate(values))
     return quotes

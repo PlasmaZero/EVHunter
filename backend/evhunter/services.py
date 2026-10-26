@@ -35,14 +35,18 @@ def bankroll(session, mode):
 def save_quotes(session, mode: str, quotes: list[Quote], provider: str | None = None, sport: str | None = None):
     if provider and sport:
         # A successful complete snapshot invalidates disappeared selections immediately.
-        books = {"kalshi"} if provider == "kalshi" else {provider} if provider.startswith("polymarket") else set(BOOKS) - {"kalshi", "polymarket", "polymarket_us"}
+        books = set(BOOKS) - {"kalshi", "polymarket", "polymarket_us"} if provider == "odds_api" else {provider}
         ids = {f"{mode}:{q.quote_id}" for q in quotes}
         for row in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == mode)).all():
+            if provider == "odds_api" and row.data.get("feed", "odds_api") != "odds_api":
+                continue
             if row.data["sport"] == sport and row.data["book"] in books and row.id not in ids:
                 session.delete(row)
     for q in quotes:
         identifier = f"{mode}:{q.quote_id}"
         row = session.get(CurrentQuote, identifier)
+        if row and row.data.get("feed") == "direct" and row.data.get("status") == "open" and q.feed == "odds_api":
+            continue  # An aggregator must not replace an active direct venue book.
         # Never let an out-of-order source update roll back the current book.
         if row and as_utc(row.data["source_at"]) > q.source_at:
             continue
@@ -150,7 +154,7 @@ def analyze(session, mode, cache=None, persist=True, for_alerts=False):
                 stake = min(sized["stake"], q.max_stake if q.max_stake is not None else sized["stake"], pref["venue_balances"].get(q.book, sized["stake"]))
                 contracts, fee = None, 0.0
                 if q.share_price is not None and stake > 0:
-                    contracts = math.floor(stake / (1/d))
+                    contracts = math.floor(stake / (q.contract_payout/d))
                     if q.contracts is not None:
                         contracts = min(contracts, math.floor(q.contracts))
                     while contracts > 0 and contracts*q.share_price + fee_for_contracts(q, contracts) > stake + 1e-8:
@@ -159,7 +163,7 @@ def analyze(session, mode, cache=None, persist=True, for_alerts=False):
                         continue
                     fee = fee_for_contracts(q, contracts)
                     stake = money(contracts*q.share_price + fee, up=True)
-                    d = contracts / stake
+                    d = contracts*q.contract_payout / stake
                 edge = (p*d-1)*100
                 if edge < pref["min_ev"]:
                     continue

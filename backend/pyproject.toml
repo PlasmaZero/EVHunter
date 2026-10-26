@@ -15,7 +15,9 @@ dependencies = [
   "redis>=5.2,<7",
   "httpx>=0.28,<1",
   "pydantic-settings>=2.8,<3",
-  "itsdangerous>=2.2,<3"
+  "itsdangerous>=2.2,<3",
+  "websockets>=15,<18",
+  "cryptography>=46,<50"
 ]
 
 [project.optional-dependencies]

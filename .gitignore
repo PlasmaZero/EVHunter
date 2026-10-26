@@ -16,3 +16,6 @@ coverage/
 test-results/
 playwright-report/
 *.egg-info/
+secrets/
+*.pem
+*.key

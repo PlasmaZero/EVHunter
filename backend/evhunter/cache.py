@@ -24,6 +24,8 @@ class Cache:
         data = [q.data for q in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == mode)).all()]
         self.redis.set(f"evhunter:{mode}:quotes", json.dumps(data), ex=ttl)
 
+        self.redis.publish(f"evhunter:{mode}:updates", "quotes")
+
     def login_allowed(self, address):
         key = f"evhunter:login:{address}"
         if self.redis:

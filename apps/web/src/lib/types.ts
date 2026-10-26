@@ -17,7 +17,7 @@ export type Preferences = {
   jurisdiction: string; allowed_books: string[]; alert_ev: number; alert_arb: number;
   email: string; email_alerts: boolean; venue_balances: Record<string, number>; jurisdiction_reviewed_at: string | null;
 };
-export type Dashboard = { opportunities: Opportunity[]; mode: "demo" | "live"; books: Books; bankroll: Summary;
+export type Dashboard = { streaming?: boolean; opportunities: Opportunity[]; mode: "demo" | "live"; books: Books; bankroll: Summary;
   preferences: Preferences; as_of: string; worker: { status: string; last_success?: string };
   counts: { quote_count: number; event_count: number; market_count: number; rejected: Record<string, number> };
 };
@@ -28,5 +28,5 @@ export type BetData = { bets: Bet[]; summary: Summary; series: { at: string; rea
 export type AlertItem = { id: string; event: string; selection: string; edge: number; type: string; created_at: string; delivery: string; read: boolean; opportunity_id: string };
 export type SourceState = { status: string; message?: string; last_success?: string; last_attempt?: string; latency_ms?: number; credits_used?: string | number; credits_remaining?: string | number; budget_spent?: number };
 export type Mapping = { id: string; market_id: string; source: string; external_id: string; yes_outcome: string; fee_model: string; fee_rate: number; reviewed_at: string };
-export type Sources = { mode: string; states: Record<string, SourceState>; books: Books; quote_counts: Record<string, number>; mappings: Mapping[]; poll_seconds: number; prediction_poll_seconds: number; monthly_credit_budget: number; smtp_configured: boolean; reviewed_books: string[] };
+export type Sources = { stream_sources: string[]; mode: string; states: Record<string, SourceState>; books: Books; quote_counts: Record<string, number>; mappings: Mapping[]; poll_seconds: number; prediction_poll_seconds: number; monthly_credit_budget: number; smtp_configured: boolean; reviewed_books: string[] };
 export type Market = { id: string; event: string; market: string; line: number | null; outcomes: string[]; ruleset: string };

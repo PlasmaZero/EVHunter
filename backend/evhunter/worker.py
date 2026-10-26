@@ -18,6 +18,7 @@ from .demo import refresh_demo
 from .domain import Quote, as_utc, utcnow
 from .providers import ProviderError, SPORTS, collect_prediction, collect_sportsbook
 from .services import analyze, create_threshold_alerts, preferences, prune, save_quotes, source_state
+from .streams import supervise_streams
 
 log = logging.getLogger("evhunter.worker")
 
@@ -105,10 +106,13 @@ async def tick(engine, config, cache):
                             source_state(session, mode, "odds_api", status="error", message=str(exc), last_attempt=now.isoformat(), budget_spent=spent, budget_month=month)
                 mappings = session.scalars(select(MarketMapping).where(MarketMapping.mode == mode)).all()
                 exemplars = {q.market_id: Quote.model_validate(q.data) for q in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == mode)).all() if q.data["book"] not in ["kalshi", "polymarket", "polymarket_us"]}
-                for source in ["kalshi", "polymarket_us", "polymarket"]:
+                for source in ["kalshi", "polymarket_us", "polymarket", "novig"]:
                     maps = [m.data for m in mappings if m.data["source"] == source]
                     if not maps:
                         source_state(session, mode, source, status="needs_mapping", message="Add a reviewed market mapping to collect quotes")
+                        continue
+                    if source == "novig":
+                        source_state(session, mode, source, status="stream_only", message="Direct Novig data uses the optional authenticated stream")
                         continue
                     prior = session.get(SourceState, f"{mode}:{source}")
                     if prior and prior.data.get("last_attempt") and (now-as_utc(prior.data["last_attempt"])).total_seconds() < config.prediction_poll_seconds:
@@ -142,28 +146,56 @@ async def tick(engine, config, cache):
         await deliver_alerts(engine, config)
 
 
-async def run_worker(engine, config, cache):
+async def poll_loop(engine, config, cache):
     while True:
-        lock_token = secrets.token_hex(16)
-        locked = False
         try:
-            if cache.redis:
-                locked = bool(cache.redis.set(f"evhunter:{config.data_mode}:worker_lock", lock_token, nx=True, ex=300))
-                if not locked:
-                    await asyncio.sleep(5)
-                    continue
-            # A cycle must finish before the 300-second distributed lease can expire.
             await asyncio.wait_for(tick(engine, config, cache), timeout=240)
         except asyncio.CancelledError:
             raise
         except Exception:
-            # No exception URL, local environment, or credential is written to logs.
             log.error("Collection cycle failed; existing quotes will expire normally")
+        await asyncio.sleep(20 if config.data_mode == "demo" else 5)
+
+
+async def maintain_lease(cache, key, token):
+    while True:
+        await asyncio.sleep(30)
+        renewed = cache.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('EXPIRE',KEYS[1],300) else return 0 end", 1, key, token)
+        if not renewed:
+            raise RuntimeError("Worker lease lost")
+
+
+async def run_worker(engine, config, cache):
+    # One leader owns both persistent sockets and periodic polling.
+    while True:
+        token, locked, tasks = secrets.token_hex(16), False, []
+        lock_key = f"evhunter:{config.data_mode}:worker_lock"
+        try:
+            if cache.redis:
+                locked = bool(cache.redis.set(lock_key, token, nx=True, ex=300))
+                if not locked:
+                    await asyncio.sleep(5)
+                    continue
+            tasks.append(asyncio.create_task(poll_loop(engine, config, cache)))
+            if config.data_mode == "live":
+                tasks.append(asyncio.create_task(supervise_streams(engine, config, cache)))
+            if cache.redis:
+                tasks.append(asyncio.create_task(maintain_lease(cache, lock_key, token)))
+            done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+            for task in done:
+                task.result()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.error("Worker leadership interrupted; reconnecting without using partial books")
         finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             if locked:
                 with suppress(Exception):
-                    cache.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end", 1, f"evhunter:{config.data_mode}:worker_lock", lock_token)
-        await asyncio.sleep(20 if config.data_mode == "demo" else 5)
+                    cache.redis.eval("if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('DEL',KEYS[1]) else return 0 end", 1, lock_key, token)
+        await asyncio.sleep(5)
 
 
 def main():
