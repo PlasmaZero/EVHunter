@@ -134,9 +134,11 @@ def analyze(session, mode, cache=None, persist=True, for_alerts=False):
                     probabilities = dict(zip(exemplar.outcomes, devig([q.odds for q in reference_rows], pref["devig_method"])))
                 except ValueError:
                     pass  # A failed devig is never silently replaced by another method.
-        eligible = [q for q in rows if q.book in pref["allowed_books"] and q.book != pref["reference_book"]]
+        eligible = [q for q in rows if q.book in pref["allowed_books"]]
         if probabilities:
             for q in eligible:
+                if q.book == pref["reference_book"]:
+                    continue  # A reference cannot establish an edge against its own price.
                 # Compare contemporaneous target/reference quotes, not a newly received old line.
                 times = [q.source_at.timestamp(), *[r.source_at.timestamp() for r in reference.values()]]
                 if max(times) - min(times) > pref["max_quote_skew"]:

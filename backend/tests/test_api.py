@@ -30,7 +30,7 @@ def test_login_is_rate_limited(client):
 def test_dashboard_computes_signals_from_quotes(owner):
     data = owner.get("/api/dashboard").json()
     assert data["mode"] == "demo"
-    assert data["counts"]["quote_count"] == 320
+    assert data["counts"]["quote_count"] == 96
     assert {o["type"] for o in data["opportunities"]} == {"ev", "arb"}
     for op in data["opportunities"]:
         assert op["is_demo"]
@@ -89,7 +89,7 @@ def test_stale_quotes_expire_instead_of_becoming_fresh(owner):
             q.data = {**q.data, "source_at": (utcnow()-timedelta(hours=1)).isoformat()}
     data = owner.get("/api/dashboard").json()
     assert data["opportunities"] == []
-    assert data["counts"]["rejected"]["stale"] == 320
+    assert data["counts"]["rejected"]["stale"] == 96
 
 
 def test_linked_snapshot_survives_strategy_changes(owner):

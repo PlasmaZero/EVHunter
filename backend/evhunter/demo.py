@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy import select
 
 from .db import Bet, CurrentQuote, History, Ledger, Preference
-from .domain import Quote, stable_id, utcnow
+from .domain import DEFAULT_EXECUTION_BOOKS, Quote, stable_id, utcnow
 from .services import save_quotes, source_state
 
 GAMES = [
@@ -16,13 +16,16 @@ GAMES = [
     ("NFL", "Buffalo Bills", "Kansas City Chiefs", 17, .48, 2.5, 48.5),
     ("NFL", "Philadelphia Eagles", "Dallas Cowboys", 20, .56, -3.5, 45.5),
 ]
-BOOK_LIST = ["fanduel", "draftkings", "betmgm", "fanatics", "williamhill_us", "novig", "prophetx", "kalshi", "polymarket_us"]
+BOOK_LIST = list(DEFAULT_EXECUTION_BOOKS)
 
 
 def refresh_demo(session, seed_history=True):
     session.execute(select(Preference).where(Preference.mode == "demo").with_for_update()).scalar_one()
     now = utcnow()
     existing = session.scalars(select(CurrentQuote).where(CurrentQuote.mode == "demo")).first()
+    for row in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == "demo")).all():
+        if row.data["book"] not in BOOK_LIST:
+            session.delete(row)
     anchor = now.replace(minute=0, second=0, microsecond=0)
     # Keep event times stable across worker refreshes, roll the fixture slate daily.
     day_key = now.strftime("%Y%m%d")
@@ -44,15 +47,14 @@ def refresh_demo(session, seed_history=True):
                 common = dict(event_id=event_id, sport=sport, home=home, away=away, starts_at=start, market=kind, line=line,
                               ruleset=f"{sport.lower()}-full-game-ot-no-push-v1", outcome=outcome, outcomes=outcomes, selection=label,
                               source_at=now-timedelta(seconds=gi+mi+1), received_at=now, is_demo=True)
-                quotes.append(Quote(**common, book="pinnacle", odds=round(1/(p*1.025), 4)))
                 for bi, book in enumerate(BOOK_LIST):
                     # A deterministic slate with good, bad and arbitrage prices; visibly synthetic.
                     edge = -.045 + .006 * ((gi*3 + mi*2 + bi + oi) % 5)
                     if bi == (gi+mi*2+oi*3) % len(BOOK_LIST):
                         edge = .025 + .009*((gi+mi+oi) % 5)
-                    if (gi+mi) % 3 == 0 and bi == (oi*3+gi) % len(BOOK_LIST):
+                    if (gi+mi) % 3 == 0 and bi == (oi+gi) % len(BOOK_LIST):
                         edge = .042 + .006*gi
-                    d = round((1+edge)/p, 4)
+                    d = round(1/(p*1.025) if book == "draftkings" else (1+edge)/p, 4)
                     if book in ["kalshi", "polymarket_us"]:
                         a = round(1/d, 3)
                         quotes.append(Quote(**common, book=book, odds=1/a, share_price=a, fee_model="curve" if book == "kalshi" else "per_contract", fee_rate=.07 if book == "kalshi" else .001,
@@ -62,15 +64,16 @@ def refresh_demo(session, seed_history=True):
     save_quotes(session, "demo", quotes)
     if not existing and seed_history:
         for q in quotes:
-            if q.book not in ["pinnacle", "fanduel", "draftkings"]:
+            if q.book not in BOOK_LIST:
                 continue
             for step in range(24):
                 at = now-timedelta(minutes=(24-step)*5)
                 wiggle = math.sin(step*.65 + len(q.outcome))*.028 + (24-step)*.0008
                 session.add(History(mode="demo", market_id=q.market_id, book=q.book, outcome=q.outcome, at=at, odds=max(1.01, q.odds+wiggle)))
         seed_bets(session, now)
-    for provider in ["odds_api", "kalshi", "polymarket_us", "polymarket"]:
-        source_state(session, "demo", provider, status="demo", message="Synthetic demonstration data", last_success=now.isoformat(), latency_ms=0, credits_used=0)
+    source_state(session, "demo", "odds_api", status="demo", message="Synthetic FanDuel, Fanatics and DraftKings data", last_success=now.isoformat(), latency_ms=0, credits_used=0)
+    for provider in ["kalshi", "polymarket_us", "polymarket"]:
+        source_state(session, "demo", provider, status="disabled", message="Not enabled for the current three-book setup")
 
 
 def seed_bets(session, now):
@@ -82,6 +85,6 @@ def seed_bets(session, now):
         status = "lost" if i in [1, 5, 8, 10] else "won"
         profit = round(stake*(odds-1), 2) if status == "won" else -stake
         at = now-timedelta(days=12-i)
-        data = {"event": ["Celtics @ Knicks", "Bills @ Chiefs", "Lakers @ Warriors"][i % 3], "selection": ["Over 224.5", "Chiefs -2.5", "Lakers ML"][i % 3], "book": BOOK_LIST[i % 5], "market": "total" if i % 3 == 0 else "spread" if i % 3 == 1 else "moneyline", "predicted_ev": 2.8+i*.23, "true_probability": .54, "method": "proportional", "reference": "pinnacle", "is_demo": True, "notes": "Synthetic settled bet", "fee": 0}
+        data = {"event": ["Celtics @ Knicks", "Bills @ Chiefs", "Lakers @ Warriors"][i % 3], "selection": ["Over 224.5", "Chiefs -2.5", "Lakers ML"][i % 3], "book": BOOK_LIST[i % len(BOOK_LIST)], "market": "total" if i % 3 == 0 else "spread" if i % 3 == 1 else "moneyline", "predicted_ev": 2.8+i*.23, "true_probability": .54, "method": "proportional", "reference": "draftkings", "is_demo": True, "notes": "Synthetic settled bet", "fee": 0}
         session.add(Bet(id=f"demo-bet-{i}", mode="demo", placed_at=at, settled_at=at+timedelta(hours=3), status=status, stake=stake, odds=odds, profit=profit, data=data))
         session.add(Ledger(id=f"demo:settle:{i}", mode="demo", at=at+timedelta(hours=3), amount=profit, kind="settlement", note=f"Synthetic settlement {i+1}"))

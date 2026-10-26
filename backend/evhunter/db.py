@@ -5,7 +5,7 @@ from sqlalchemy import JSON, DateTime, Float, Index, Integer, Numeric, String, T
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from .config import ROOT, Config
-from .domain import EXECUTION_BOOKS, utcnow
+from .domain import DEFAULT_EXECUTION_BOOKS, utcnow
 
 
 class Base(DeclarativeBase):
@@ -118,10 +118,10 @@ def make_engine(config: Config):
 def default_preferences(mode: str) -> dict:
     return {
         "min_ev": 1.0, "min_arb": 0.2, "devig_method": "proportional",
-        "reference_book": "pinnacle", "kelly_fraction": 0.25,
+        "reference_book": "draftkings", "kelly_fraction": 0.25,
         "max_stake_pct": 2.0, "arb_budget": 1000.0,
         "max_quote_age": 120, "max_quote_skew": 75,
-        "jurisdiction": "NY", "allowed_books": EXECUTION_BOOKS if mode == "demo" else EXECUTION_BOOKS[:5],
+        "jurisdiction": "NY", "allowed_books": list(DEFAULT_EXECUTION_BOOKS),
         "alert_ev": 3.0, "alert_arb": 1.0, "email": "", "email_alerts": False,
         "venue_balances": {}, "jurisdiction_reviewed_at": None,
     }
@@ -136,6 +136,13 @@ def initialize(engine, config: Config):
         with Session(bind=connection) as session:
             if not session.get(Preference, config.data_mode):
                 session.add(Preference(mode=config.data_mode, data=default_preferences(config.data_mode)))
+            # Apply the requested venue restriction once, preserving all bets, cash and other settings.
+            migration_id = f"{config.data_mode}:three-book-defaults-v1"
+            if not session.get(SourceState, migration_id):
+                preference = session.get(Preference, config.data_mode)
+                if preference:
+                    preference.data = {**preference.data, "allowed_books": list(DEFAULT_EXECUTION_BOOKS), "reference_book": "draftkings"}
+                session.add(SourceState(id=migration_id, data={"applied_at": utcnow().isoformat()}))
             if not session.get(Ledger, f"{config.data_mode}:opening"):
                 session.add(Ledger(id=f"{config.data_mode}:opening", mode=config.data_mode, at=utcnow()-timedelta(days=30) if config.data_mode == "demo" else utcnow(), amount=10000 if config.data_mode == "demo" else 0, kind="deposit", note="Synthetic opening bankroll" if config.data_mode == "demo" else "Opening balance"))
             session.flush()

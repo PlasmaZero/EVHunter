@@ -21,7 +21,7 @@ class Config(BaseSettings):
     odds_api_key: str = ""
     odds_api_base_url: str = "https://api.the-odds-api.com/v4"
     sports: str = "basketball_nba,americanfootball_nfl"
-    bookmakers: str = "fanduel,draftkings,betmgm,fanatics,williamhill_us,novig,prophetx,pinnacle"
+    bookmakers: str = "fanduel,fanatics,draftkings"
     reviewed_books: str = ""
     exchange_fee_config: str = "{}"
     poll_seconds: int = Field(default=60, ge=20)

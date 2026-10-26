@@ -68,6 +68,10 @@ The app reads market data and records bets you have already placed. It does not 
 
 ### 1. Configure the sportsbook feed
 
+The default feed and execution venues are **FanDuel, Fanatics, and DraftKings only**. DraftKings is the initial reference for estimating +EV at FanDuel and Fanatics; it is still included in arbitrage comparisons. This uses a retail pricing proxy, so it does not establish an independently validated probability. Change the reference in Settings when you have another supported benchmark.
+
+For an existing checkout, run `git pull`, change `BOOKMAKERS` in your existing `.env` to `fanduel,fanatics,draftkings`, and restart. The one-time preference update narrows the selected execution books and chooses DraftKings as the reference without changing bets or bankroll records.
+
 Get an API key from [The Odds API](https://the-odds-api.com/). Its paid coverage currently lists FanDuel, DraftKings, BetMGM, Fanatics, Caesars, Novig, ProphetX, and Pinnacle. Coverage varies by sport and market. API access and data-use rights are governed by the provider agreement.
 
 In your **untracked** `.env`:
@@ -75,6 +79,7 @@ In your **untracked** `.env`:
 ```dotenv
 DATA_MODE=live
 ODDS_API_KEY=your-real-key
+BOOKMAKERS=fanduel,fanatics,draftkings
 POLL_SECONDS=60
 SPORTS=basketball_nba,americanfootball_nfl
 ```
@@ -82,10 +87,10 @@ SPORTS=basketball_nba,americanfootball_nfl
 Read the current full-game settlement rules for the venues you intend to compare. Then explicitly list reviewed feed books:
 
 ```dotenv
-REVIEWED_BOOKS=fanduel,draftkings,betmgm,fanatics,williamhill_us
+REVIEWED_BOOKS=fanduel,fanatics,draftkings
 ```
 
-Caesars uses the provider key `williamhill_us`. Unreviewed feed quotes remain visible in coverage counts but cannot enter opportunity calculations. Pinnacle is initially reference-only; its aggregated odds may be delayed.
+Unreviewed feed quotes remain visible in coverage counts but cannot enter opportunity calculations. Fanatics requires a paid provider subscription. Other adapters remain available for a future expansion but are not part of the default feed. If you later add Pinnacle as a reference, its aggregated odds may be delayed.
 
 **Novig and ProphetX are excluded from live calculations until their fee treatment is configured.** Do not assume either is fee-free. `EXCHANGE_FEE_CONFIG` accepts reviewed profit-commission or verified zero-fee sportsbook-style returns, for example:
 
