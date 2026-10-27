@@ -164,6 +164,26 @@ Data-access costs are separate from trading fees, infrastructure bills, and data
 
 References: [Kalshi streams](https://docs.kalshi.com/getting_started/quick_start_websockets), [Polymarket US streams](https://docs.polymarket.us/api-reference/websocket/markets), [Polymarket market stream](https://docs.polymarket.com/market-data/realtime-data), [Novig API](https://docs.novig.com/), [Novig stream](https://docs.novig.com/api/streaming/connection), [Novig fees and penny payouts](https://docs.novig.com/api/concepts/fees).
 
+## Best Bets research grades
+
+Open **Best bets** in the sidebar to rank detected +EV selections by a transparent 0–100 research grade. Select a row to inspect every factor, source date, uncertainty, and grade cap; log an accepted bet through the existing tracker.
+
+| Factor | Maximum points |
+| --- | ---: |
+| Fee-adjusted estimated EV | 35 |
+| Matchup and scoring baseline | 20 |
+| Injury report / IR | 15 |
+| Reference quality and cross-book confirmation | 15 |
+| Quote freshness and reported execution size | 15 |
+
+The grade is a heuristic research-priority score, **not a win probability or a backtested prediction model**. EV, probability, and capped Kelly stakes retain their existing calculations. Cross-book agreement does not establish independent model accuracy. Retail references receive less benchmark credit than sharp/exchange references.
+
+**Edit research** saves evidence against the exact canonical market, line, and outcome, shared across offered books. Add both teams' points scored/allowed averages and game counts, matchup reasoning (including WR/CB alignment, usage, pace, rest, and scheme where relevant), and an injury/IR risk assessment. Each reviewed block requires its source URL and actual as-of time. Sources and assessments are owner-supplied; the application does not fetch or independently verify injury reports or source-page contents. No additional API or AI key is required for this version. Existing odds feeds do not supply this research.
+
+The scoring baseline equally blends each offense's points scored with the opponent's points allowed. Its direction is evaluated against the exact handicap or total, without converting it into a win probability. At least four games per team are required for a complete review. Scoring data expires after seven days, matchup research after 24 hours, and injury research after six hours. Missing/stale/small-sample research caps the grade at 69; material injury risk caps it at 59; unresolved injury risk caps it at 49. A candidate needs a grade of at least 70, current research, no material or unresolved injury risk, and positive funded sizing. Labels are A ≥85, B ≥70, C ≥55, D <55.
+
+Demo mode includes clearly labeled fictional research examples. Live mode never inherits those examples. The new `bet_research` table is additive and is created by the existing initialization path; no existing tables or bankroll data are replaced. Research writes require the owner session and CSRF token and are recorded in the audit log. Player touchdown props still require a future props ingestion extension; this section grades the current moneyline/spread/totals feed.
+
 ## Pricing and matching rules
 
 Canonical identity includes event, market type, exact home spread or total line, complete outcome set, and settlement identity. The first version supports NBA full-game moneyline and verified half-point NBA/NFL spreads and totals. NFL moneylines, integer lines, player props, and ambiguous settlement cases are excluded.

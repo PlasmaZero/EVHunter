@@ -17,8 +17,9 @@ from sqlalchemy import select, text
 from starlette.middleware.sessions import SessionMiddleware
 
 from .cache import Cache
+from .best_bets import ResearchInput, rank_best_bets, research_key
 from .config import Config
-from .db import Alert, AuditEvent, Bet, CurrentQuote, History, Ledger, MarketMapping, OpportunityRecord, Preference, SourceState, initialize, make_engine, transaction
+from .db import Alert, AuditEvent, Bet, BetResearch, CurrentQuote, History, Ledger, MarketMapping, OpportunityRecord, Preference, SourceState, initialize, make_engine, transaction
 from .demo import refresh_demo
 from .domain import BOOKS, Quote, as_utc, stable_id, utcnow
 from .pricing import decimal_odds, devig, kelly, money
@@ -228,10 +229,40 @@ def create_app(config: Config | None = None):
         with transaction(app.state.engine) as session:
             opportunities, counts = analyze(session, config.data_mode, app.state.cache)
             worker = session.get(SourceState, f"{config.data_mode}:worker")
+            pref = preferences(session, config.data_mode)
             return {"opportunities": opportunities, "counts": counts, "bankroll": bankroll(session, config.data_mode),
-                    "preferences": preferences(session, config.data_mode), "books": BOOKS,
+                    "preferences": pref, "books": BOOKS,
+                    "best_bets": rank_best_bets(session, config.data_mode, opportunities, pref),
                     "mode": config.data_mode, "as_of": utcnow().isoformat(), "streaming": config.data_mode == "live" and bool(config.stream_sources),
                     "worker": worker.data if worker else {"status": "starting"}}
+
+    @app.put("/api/research", dependencies=[Depends(require_owner)])
+    def save_research(body: ResearchInput):
+        with transaction(app.state.engine) as session:
+            lock_owner(session, config.data_mode)
+            rows = session.scalars(select(CurrentQuote).where(CurrentQuote.mode == config.data_mode, CurrentQuote.market_id == body.market_id)).all()
+            if not rows or body.outcome not in rows[0].data["outcomes"]:
+                raise HTTPException(422, "Choose a selection from an ingested market in this workspace")
+            key = f"{config.data_mode}:{research_key(body.market_id, body.outcome)}"
+            row = session.get(BetResearch, key)
+            now = utcnow()
+            payload = {**body.model_dump(mode="json"), "origin": "owner", "updated_at": now.isoformat()}
+            if row:
+                row.data, row.updated_at = payload, now
+            else:
+                session.add(BetResearch(id=key, mode=config.data_mode, market_id=body.market_id, updated_at=now, data=payload))
+            session.add(AuditEvent(action="research.updated", detail=f"mode={config.data_mode};selection={research_key(body.market_id, body.outcome)}"))
+            return payload
+
+    @app.delete("/api/research/{key}", dependencies=[Depends(require_owner)])
+    def delete_research(key: str):
+        with transaction(app.state.engine) as session:
+            lock_owner(session, config.data_mode)
+            row = session.get(BetResearch, f"{config.data_mode}:{key}")
+            if row:
+                session.delete(row)
+                session.add(AuditEvent(action="research.deleted", detail=f"mode={config.data_mode};selection={key}"))
+            return {"ok": True}
 
     @app.get("/api/stream", dependencies=[Depends(require_owner)])
     async def live_updates(request: Request):

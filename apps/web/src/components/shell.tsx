@@ -13,6 +13,7 @@ export function useTerminal() { const c = useContext(TerminalContext); if (!c) t
 
 const navigation = [
   { href: "/", label: "Opportunities", icon: LayoutDashboard },
+  { href: "/best-bets", label: "Best bets", icon: Target },
   { href: "/bets", label: "Bet tracker", icon: Wallet },
   { href: "/calculators", label: "Calculators", icon: Calculator },
   { href: "/sources", label: "Data sources", icon: Database },

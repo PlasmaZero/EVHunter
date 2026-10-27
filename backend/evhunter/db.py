@@ -83,6 +83,15 @@ class MarketMapping(Base):
     data: Mapped[dict] = mapped_column(JSON)
 
 
+class BetResearch(Base):
+    __tablename__ = "bet_research"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    mode: Mapped[str] = mapped_column(String(8), index=True)
+    market_id: Mapped[str] = mapped_column(String(32), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    data: Mapped[dict] = mapped_column(JSON)
+
+
 class Alert(Base):
     __tablename__ = "alerts"
     id: Mapped[str] = mapped_column(String(80), primary_key=True)

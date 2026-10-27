@@ -6,7 +6,7 @@ export type Opportunity = {
   id: string; snapshot_id: string; market_id: string; type: "ev" | "arb"; sport: string;
   home: string; away: string; event: string; market: string; line: number | null; selection: string;
   books: string[]; edge: number; stake: number; profit: number; odds: number | null;
-  effective_odds?: number; true_probability: number | null; fair_odds?: number;
+  effective_odds?: number; true_probability: number | null; fair_odds?: number; outcome?: string;
   method: string | null; reference: string | null; starts_at: string; source_at: string;
   observed_at: string; size_verified: boolean; ruleset: string; comparison: Comparison[]; legs: Leg[]; is_demo: boolean;
 };
@@ -17,7 +17,7 @@ export type Preferences = {
   jurisdiction: string; allowed_books: string[]; alert_ev: number; alert_arb: number;
   email: string; email_alerts: boolean; venue_balances: Record<string, number>; jurisdiction_reviewed_at: string | null;
 };
-export type Dashboard = { streaming?: boolean; opportunities: Opportunity[]; mode: "demo" | "live"; books: Books; bankroll: Summary;
+export type Dashboard = { streaming?: boolean; best_bets?: BestBets; opportunities: Opportunity[]; mode: "demo" | "live"; books: Books; bankroll: Summary;
   preferences: Preferences; as_of: string; worker: { status: string; last_success?: string };
   counts: { quote_count: number; event_count: number; market_count: number; rejected: Record<string, number> };
 };
@@ -30,3 +30,17 @@ export type SourceState = { status: string; message?: string; last_success?: str
 export type Mapping = { id: string; market_id: string; source: string; external_id: string; yes_outcome: string; fee_model: string; fee_rate: number; reviewed_at: string };
 export type Sources = { stream_sources: string[]; mode: string; states: Record<string, SourceState>; books: Books; quote_counts: Record<string, number>; mappings: Mapping[]; poll_seconds: number; prediction_poll_seconds: number; monthly_credit_budget: number; smtp_configured: boolean; reviewed_books: string[] };
 export type Market = { id: string; event: string; market: string; line: number | null; outcomes: string[]; ruleset: string };
+
+export type ScoringAverages = { home_for: number; home_against: number; away_for: number; away_against: number; home_games: number; away_games: number; source_url: string | null; as_of: string };
+export type BetResearch = {
+  market_id: string; outcome: string; origin?: "owner" | "synthetic"; updated_at?: string; scoring: ScoringAverages | null;
+  matchup: "unknown" | "favorable" | "neutral" | "unfavorable"; matchup_notes: string; matchup_source_url: string | null; matchup_as_of: string | null;
+  injury_status: "unknown" | "clear" | "manageable" | "material" | "unresolved"; injury_notes: string; injury_source_url: string | null; injury_as_of: string | null;
+};
+export type BetFactor = { key: string; label: string; points: number; max_points: number; state: string; reasons: string[] };
+export type BestBet = { opportunity: Opportunity; research_key: string; research: BetResearch | null; score: number; raw_score: number; letter: string;
+  state: "candidate" | "provisional" | "watch"; coverage: number; factors: BetFactor[]; risks: string[];
+  caps: { maximum: number; reason: string }[]; projection: { home: number; away: number; total: number; margin: number; selection_cushion: number; method: string } | null;
+  summary: string; graded_at: string; version: string; synthetic_research: boolean;
+};
+export type BestBets = { items: BestBet[]; methodology: { version: string; weights: Record<string, number>; description: string; freshness: Record<string, number>; caps: Record<string, number> }; as_of: string; counts: { total: number; candidates: number; provisional: number; reviewed: number } };
