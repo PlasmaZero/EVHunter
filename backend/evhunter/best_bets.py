@@ -9,13 +9,14 @@ from sqlalchemy import select
 from .db import BetResearch
 from .domain import as_utc, stable_id, utcnow
 from .pricing import devig
+from .sports import SPORT_PROFILES, public_profiles
 
-VERSION = "research-v1"
+VERSION = "research-v2"
 WEIGHTS = {"ev": 35, "matchup": 20, "injuries": 15, "market": 15, "execution": 15}
 METHOD = {
     "version": VERSION, "weights": WEIGHTS,
     "description": "A research-priority score, not a win probability or a calibrated betting model. Matchup and injury inputs are owner-supplied research; source links are not independently verified.",
-    "freshness": {"scoring_hours": 168, "matchup_hours": 24, "injury_hours": 6},
+    "freshness_by_sport": {s: {k: p[k] for k in ["scoring_hours", "matchup_hours", "injury_hours"]} for s, p in SPORT_PROFILES.items()}, "sport_aware": True,
     "caps": {"incomplete_research": 69, "material_injury_risk": 59, "unresolved_injury_risk": 49},
 }
 
@@ -40,8 +41,8 @@ class ScoringAverages(StrictModel):
     home_against: float = Field(ge=0, le=300)
     away_for: float = Field(ge=0, le=300)
     away_against: float = Field(ge=0, le=300)
-    home_games: int = Field(ge=1, le=100)
-    away_games: int = Field(ge=1, le=100)
+    home_games: int = Field(ge=1, le=300)
+    away_games: int = Field(ge=1, le=300)
     source_url: HttpUrl
     as_of: datetime
     _time = field_validator("as_of")(checked_time)
@@ -59,6 +60,7 @@ class ResearchInput(StrictModel):
     injury_notes: str = Field(default="", max_length=2000)
     injury_source_url: HttpUrl | None = None
     injury_as_of: datetime | None = None
+    availability_checks: dict[str, bool] = Field(default_factory=dict, max_length=12)
     _times = field_validator("matchup_as_of", "injury_as_of")(checked_time)
 
     @model_validator(mode="after")
@@ -95,28 +97,32 @@ def scoring_projection(op, scoring):
     else:
         home_cushion = margin+(line if op["market"] == "spread" else 0)
         cushion = home_cushion if outcome == op["home"] else -home_cushion
-    return {"home": round(home, 2), "away": round(away, 2), "total": round(total, 2), "margin": round(margin, 2), "selection_cushion": round(cushion, 2), "method": "Equal-weight points scored / opponent points allowed; no opponent-strength or personnel adjustment"}
+    return {"home": round(home, 2), "away": round(away, 2), "total": round(total, 2), "margin": round(margin, 2), "selection_cushion": round(cushion, 2), "unit": SPORT_PROFILES[op["sport"]]["unit"], "method": "Equal-weight scoring / opponent scoring allowed; no opponent-strength or personnel adjustment"}
 
 
 def synthetic_research(op, now):
     """Explicitly fictional examples; never used in live mode or persisted as real research."""
-    nba = op["sport"] == "NBA"
+    profile = SPORT_PROFILES[op["sport"]]
+    home_for, home_against, away_for, away_against = profile["demo_scoring"]
     return {
         "market_id": op["market_id"], "outcome": op["outcome"], "origin": "synthetic",
-        "scoring": {"home_for": 116 if nba else 26, "home_against": 109 if nba else 20,
-                    "away_for": 112 if nba else 22, "away_against": 114 if nba else 25,
-                    "home_games": 12 if nba else 6, "away_games": 12 if nba else 6,
+        "scoring": {"home_for": home_for, "home_against": home_against,
+                    "away_for": away_for, "away_against": away_against,
+                    "home_games": max(12, profile["minimum_games"]), "away_games": max(12, profile["minimum_games"]),
                     "source_url": None, "as_of": now.isoformat()},
-        "matchup": "favorable", "matchup_notes": "Synthetic example: favorable pace and rotation fit." if nba else "Synthetic example: favorable coverage alignment and protection. Real WR/CB assignments require sourced research.",
+        "matchup": "favorable", "matchup_notes": f"Synthetic {op['sport']} example only. {profile['matchup_hint']}",
         "matchup_source_url": None, "matchup_as_of": now.isoformat(),
         "injury_status": "clear", "injury_notes": "Synthetic injury review for demonstration. This is not a real injury report.",
         "injury_source_url": None, "injury_as_of": now.isoformat(),
+        "availability_checks": {key: True for key in profile["required_checks"]},
     }
 
 
 def grade_bet(op, pref, research=None, now=None):
     now = now or utcnow()
     r = research or {}
+    profile = SPORT_PROFILES[op["sport"]]
+    unit = profile["unit"]
     demo = bool(op.get("is_demo"))
     synthetic = demo and r.get("origin") == "synthetic"
     risks, caps, factors = [], [], []
@@ -133,29 +139,30 @@ def grade_bet(op, pref, research=None, now=None):
     ])
 
     s = r.get("scoring")
-    stats_ok = bool(s and fresh(s.get("as_of"), 168, now) and (synthetic or s.get("source_url")))
+    stats_ok = bool(s and fresh(s.get("as_of"), profile["scoring_hours"], now) and (synthetic or s.get("source_url")))
     projection, matchup_points, matchup_reasons = None, 0, []
     small_sample = False
     if stats_ok:
         assessed += 10
         projection = scoring_projection(op, s)
-        small_sample = min(s["home_games"], s["away_games"]) < 4
-        scale = 10 if op["sport"] == "NBA" else 6
+        small_sample = min(s["home_games"], s["away_games"]) < profile["minimum_games"]
+        scale = profile["matchup_scale"]
         matchup_points = 10*clamp(.5+projection["selection_cushion"]/scale)
         if small_sample:
             matchup_points = min(3, matchup_points)
-            risks.append("Scoring averages cover fewer than four games for at least one team.")
+            risks.append(f"Scoring averages cover fewer than {profile['minimum_games']} games for at least one {op['sport']} team.")
         matchup_reasons.extend([
-            f"{op['home']}: {s['home_for']:.1f} scored / {s['home_against']:.1f} allowed ({s['home_games']} games). {op['away']}: {s['away_for']:.1f} / {s['away_against']:.1f} ({s['away_games']} games).",
-            f"Simple scoring baseline: {op['home']} {projection['home']:.1f}, {op['away']} {projection['away']:.1f}; selection cushion {projection['selection_cushion']:+.1f} points against this exact line.",
+            f"{op['home']}: {s['home_for']:.1f} {unit} scored / {s['home_against']:.1f} allowed ({s['home_games']} games). {op['away']}: {s['away_for']:.1f} / {s['away_against']:.1f} ({s['away_games']} games).",
+            f"Simple scoring baseline: {op['home']} {projection['home']:.1f}, {op['away']} {projection['away']:.1f}; selection cushion {projection['selection_cushion']:+.1f} {unit} against this exact line.",
+            f"Directional grading uses a sensitivity scale of {scale:g} {unit} for {op['sport']}; this is a rubric setting, not a calibrated forecast error.",
             "This baseline ignores schedule strength and lineup changes. Its directional score is not a modeled win probability.",
         ])
         if projection["selection_cushion"] < 0:
             risks.append("The simple scoring baseline leans against this selection.")
     else:
-        matchup_reasons.append("Scoring averages are missing or older than seven days; no scoring-baseline points awarded.")
-        risks.append("Add current points scored / allowed, sample sizes, and a source.")
-    matchup_ok = r.get("matchup", "unknown") != "unknown" and fresh(r.get("matchup_as_of"), 24, now) and (synthetic or bool(r.get("matchup_source_url") and r.get("matchup_notes")))
+        matchup_reasons.append(f"Scoring averages are missing or older than {profile['scoring_hours']} hours; no scoring-baseline points awarded.")
+        risks.append(f"Add current {unit} scored / allowed, sample sizes, and a source.")
+    matchup_ok = r.get("matchup", "unknown") != "unknown" and fresh(r.get("matchup_as_of"), profile["matchup_hours"], now) and (synthetic or bool(r.get("matchup_source_url") and r.get("matchup_notes")))
     if matchup_ok:
         assessed += 10
         matchup_points += {"favorable": 10, "neutral": 5, "unfavorable": 0}[r["matchup"]]
@@ -163,18 +170,19 @@ def grade_bet(op, pref, research=None, now=None):
         if r["matchup"] == "unfavorable":
             risks.append("Reviewed matchup assessment is unfavorable.")
     else:
-        matchup_reasons.append("No current sourced matchup review. Coverage assignments, pace, rest, and usage are not inferred from odds.")
-        risks.append("Matchup research is missing or older than 24 hours.")
+        matchup_reasons.append(f"No current sourced {op['sport']} matchup review. {profile['matchup_hint']} These facts are not inferred from odds.")
+        risks.append(f"Matchup research is missing or older than {profile['matchup_hours']} hours.")
     factor("matchup", "Matchup & scoring", matchup_points, matchup_reasons, "assessed" if stats_ok and matchup_ok else "incomplete")
 
     injury_status = r.get("injury_status", "unknown")
-    injury_ok = injury_status != "unknown" and fresh(r.get("injury_as_of"), 6, now) and (synthetic or bool(r.get("injury_source_url") and r.get("injury_notes")))
+    missing_checks = [label for key, label in profile["required_checks"].items() if not r.get("availability_checks", {}).get(key)]
+    injury_ok = not missing_checks and injury_status != "unknown" and fresh(r.get("injury_as_of"), profile["injury_hours"], now) and (synthetic or bool(r.get("injury_source_url") and r.get("injury_notes")))
     if injury_ok:
         assessed += 15
-        factor("injuries", "Injury report / IR", {"clear": 15, "manageable": 9, "material": 3, "unresolved": 0}[injury_status], [f"Owner injury review: {injury_status}. {r['injury_notes']}", "Review actives, IR, usage restrictions, and late lineup changes. A source link does not independently verify this assessment."])
+        factor("injuries", profile["injury_label"], {"clear": 15, "manageable": 9, "material": 3, "unresolved": 0}[injury_status], [f"Owner availability review: {injury_status}. {r['injury_notes']}", profile["injury_hint"], "A source link does not independently verify this assessment."])
     else:
-        factor("injuries", "Injury report / IR", 0, ["Injury report is missing or older than six hours. Missing information does not mean a healthy lineup."], "incomplete")
-        risks.append("Current injury/IR review is required.")
+        factor("injuries", profile["injury_label"], 0, [f"Availability review is incomplete or older than {profile['injury_hours']} hours. Missing information does not mean a healthy or confirmed lineup.", *[f"Not confirmed: {label}." for label in missing_checks]], "incomplete")
+        risks.append(f"Current {op['sport']} injury/availability review is required.")
     if injury_status in {"material", "unresolved"}:
         # Expiry cannot erase a known concern or improve an unresolved bet's grade.
         risks.append("Material injury risk affects this selection." if injury_status == "material" else "An important player or workload decision remains unresolved.")
@@ -235,6 +243,7 @@ def grade_bet(op, pref, research=None, now=None):
         "factors": factors, "risks": risks, "caps": caps, "projection": projection,
         "summary": f"{edge:+.2f}% estimated EV; " + ("research is current." if complete else "research needs review."),
         "graded_at": now.isoformat(), "version": VERSION, "synthetic_research": synthetic,
+        "sport_profile": public_profiles()[op["sport"]],
     }
 
 
@@ -243,7 +252,10 @@ def rank_best_bets(session, mode, opportunities, pref):
     records = {row.id: row.data for row in session.scalars(select(BetResearch).where(BetResearch.mode == mode)).all()}
     graded = []
     selections = [op for op in opportunities if op["type"] == "ev"]
-    demo_keys = {research_key(op["market_id"], op["outcome"]) for op in selections[:3]} if mode == "demo" else set()
+    first_by_sport = {}
+    for op in selections:
+        first_by_sport.setdefault(op["sport"], research_key(op["market_id"], op["outcome"]))
+    demo_keys = set(first_by_sport.values()) if mode == "demo" else set()
     for op in selections:
         key = research_key(op["market_id"], op["outcome"])
         research = records.get(f"{mode}:{key}")

@@ -10,6 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from .db import Alert, Bet, CurrentQuote, History, Ledger, OpportunityRecord, Preference, SourceState
 from .domain import BOOKS, Quote, as_utc, stable_id, utcnow
 from .pricing import best_arbitrage, devig, effective_odds, fee_for_contracts, kelly, money
+from .sports import SPORT_PROFILES
 
 
 def preferences(session, mode):
@@ -98,15 +99,20 @@ def analyze(session, mode, cache=None, persist=True, for_alerts=False):
     cash = bankroll(session, mode)
     quotes = load_quotes(session, mode, cache)
     groups = defaultdict(list)
-    rejected = {"stale": 0, "rules": 0, "fees": 0, "started": 0}
+    rejected = {"stale": 0, "rules": 0, "fees": 0, "started": 0, "disabled_sport": 0}
     for q in quotes:
+        if q.sport not in SPORT_PROFILES or q.sport not in pref.get("enabled_sports", SPORT_PROFILES):
+            rejected["disabled_sport"] += 1
+            continue
         if q.starts_at <= now:
             rejected["started"] += 1
             continue
         if (now - q.source_at).total_seconds() > pref["max_quote_age"] or (q.source_at - now).total_seconds() > 5:
             rejected["stale"] += 1
             continue
-        if not q.rules_verified or q.status != "open":
+        reviewed_by_league = pref.get("league_rule_reviews", {})
+        unreviewed = mode == "live" and q.feed == "odds_api" and (q.sport in reviewed_by_league or q.sport not in {"NBA", "NFL"}) and q.book not in reviewed_by_league.get(q.sport, []) and not (q.book == "pinnacle" and q.sport in {"NBA", "NFL"})
+        if not q.rules_verified or q.status != "open" or unreviewed:
             rejected["rules"] += 1
             continue
         if q.fee_model == "unknown":

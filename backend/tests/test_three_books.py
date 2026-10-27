@@ -20,7 +20,7 @@ def test_defaults_and_demo_use_only_selected_books(owner):
 
 
 def test_reference_book_remains_eligible_for_arbitrage(tmp_path):
-    config = Config(app_env="test", data_mode="live", embed_worker=False, database_url=f"sqlite:///{tmp_path}/arb.db", _env_file=None)
+    config = Config(app_env="test", data_mode="live", embed_worker=False, reviewed_books="fanduel,draftkings", database_url=f"sqlite:///{tmp_path}/arb.db", _env_file=None)
     engine = make_engine(config)
     initialize(engine, config)
     now = utcnow()

@@ -7,6 +7,7 @@ from sqlalchemy import select
 from .db import Bet, CurrentQuote, History, Ledger, Preference
 from .domain import DEFAULT_EXECUTION_BOOKS, Quote, stable_id, utcnow
 from .services import save_quotes, source_state
+from .sports import SPORT_PROFILES
 
 GAMES = [
     ("NBA", "Boston Celtics", "New York Knicks", 2.5, .535, -3.5, 224.5),
@@ -15,6 +16,11 @@ GAMES = [
     ("NBA", "Milwaukee Bucks", "Cleveland Cavaliers", 7, .435, 4.5, 222.5),
     ("NFL", "Buffalo Bills", "Kansas City Chiefs", 17, .48, 2.5, 48.5),
     ("NFL", "Philadelphia Eagles", "Dallas Cowboys", 20, .56, -3.5, 45.5),
+    ("MLB", "New York Yankees", "Los Angeles Dodgers", 9, .52, -1.5, 8.5),
+    ("NHL", "New York Rangers", "New Jersey Devils", 10, .48, 1.5, 6.5),
+    ("WNBA", "New York Liberty", "Las Vegas Aces", 11, .54, -3.5, 166.5),
+    ("NCAAB", "Duke Blue Devils", "UConn Huskies", 12, .55, -4.5, 145.5),
+    ("NCAAF", "Ohio State Buckeyes", "Michigan Wolverines", 13, .57, -6.5, 51.5),
 ]
 BOOK_LIST = list(DEFAULT_EXECUTION_BOOKS)
 
@@ -45,7 +51,7 @@ def refresh_demo(session, seed_history=True):
                 p = p0 if oi == 0 else 1-p0
                 label = f"{'Over' if oi == 0 else 'Under'} {line}" if kind == "total" else f"{outcome} {line if oi == 0 else -line:+g}" if kind == "spread" else outcome
                 common = dict(event_id=event_id, sport=sport, home=home, away=away, starts_at=start, market=kind, line=line,
-                              ruleset=f"{sport.lower()}-full-game-ot-no-push-v1", outcome=outcome, outcomes=outcomes, selection=label,
+                              ruleset=SPORT_PROFILES[sport]["settlement"], outcome=outcome, outcomes=outcomes, selection=label,
                               source_at=now-timedelta(seconds=gi+mi+1), received_at=now, is_demo=True)
                 for bi, book in enumerate(BOOK_LIST):
                     # A deterministic slate with good, bad and arbitrage prices; visibly synthetic.

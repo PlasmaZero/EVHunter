@@ -20,9 +20,10 @@ class Config(BaseSettings):
     embed_worker: bool = True
     odds_api_key: str = ""
     odds_api_base_url: str = "https://api.the-odds-api.com/v4"
-    sports: str = "basketball_nba,americanfootball_nfl"
+    sports: str = "basketball_nba,americanfootball_nfl,baseball_mlb,icehockey_nhl"
     bookmakers: str = "fanduel,fanatics,draftkings"
     reviewed_books: str = ""
+    sport_rule_reviews: dict[str, list[str]] = Field(default_factory=dict)
     exchange_fee_config: str = "{}"
     poll_seconds: int = Field(default=60, ge=20)
     prediction_poll_seconds: int = Field(default=20, ge=10)

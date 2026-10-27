@@ -6,6 +6,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from .config import ROOT, Config
 from .domain import DEFAULT_EXECUTION_BOOKS, utcnow
+from .sports import DEFAULT_LIVE_SPORTS, LEGACY_RULE_SPORTS, SPORTS, SPORT_PROFILES
 
 
 class Base(DeclarativeBase):
@@ -133,6 +134,8 @@ def default_preferences(mode: str) -> dict:
         "jurisdiction": "NY", "allowed_books": list(DEFAULT_EXECUTION_BOOKS),
         "alert_ev": 3.0, "alert_arb": 1.0, "email": "", "email_alerts": False,
         "venue_balances": {}, "jurisdiction_reviewed_at": None,
+        "enabled_sports": list(SPORT_PROFILES) if mode == "demo" else list(DEFAULT_LIVE_SPORTS),
+        "league_rule_reviews": {s: list(DEFAULT_EXECUTION_BOOKS) for s in SPORT_PROFILES} if mode == "demo" else {},
     }
 
 
@@ -143,8 +146,11 @@ def initialize(engine, config: Config):
             connection.execute(text("SELECT pg_advisory_xact_lock(71423001)"))
         Base.metadata.create_all(connection)
         with Session(bind=connection) as session:
+            initial_sports = list(SPORT_PROFILES) if config.data_mode == "demo" else list(dict.fromkeys(SPORTS[k.strip()] for k in config.sports.split(",") if k.strip() in SPORTS))
+            initial_reviews = {s: list(DEFAULT_EXECUTION_BOOKS) for s in SPORT_PROFILES} if config.data_mode == "demo" else {
+                s: config.sport_rule_reviews.get(s, [b.strip() for b in config.reviewed_books.split(",") if b.strip()] if s in LEGACY_RULE_SPORTS else []) for s in SPORT_PROFILES}
             if not session.get(Preference, config.data_mode):
-                session.add(Preference(mode=config.data_mode, data=default_preferences(config.data_mode)))
+                session.add(Preference(mode=config.data_mode, data={**default_preferences(config.data_mode), "enabled_sports": initial_sports, "league_rule_reviews": initial_reviews}))
             # Apply the requested venue restriction once, preserving all bets, cash and other settings.
             migration_id = f"{config.data_mode}:three-book-defaults-v1"
             if not session.get(SourceState, migration_id):
@@ -152,6 +158,8 @@ def initialize(engine, config: Config):
                 if preference:
                     preference.data = {**preference.data, "allowed_books": list(DEFAULT_EXECUTION_BOOKS), "reference_book": "draftkings"}
                 session.add(SourceState(id=migration_id, data={"applied_at": utcnow().isoformat()}))
+            preference = session.get(Preference, config.data_mode)
+            preference.data = {**preference.data, "enabled_sports": preference.data.get("enabled_sports", initial_sports), "league_rule_reviews": preference.data.get("league_rule_reviews", initial_reviews)}
             if not session.get(Ledger, f"{config.data_mode}:opening"):
                 session.add(Ledger(id=f"{config.data_mode}:opening", mode=config.data_mode, at=utcnow()-timedelta(days=30) if config.data_mode == "demo" else utcnow(), amount=10000 if config.data_mode == "demo" else 0, kind="deposit", note="Synthetic opening bankroll" if config.data_mode == "demo" else "Opening balance"))
             session.flush()

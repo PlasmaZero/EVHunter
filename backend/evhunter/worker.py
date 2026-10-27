@@ -70,6 +70,9 @@ async def tick(engine, config, cache):
     mode = config.data_mode
     async with httpx.AsyncClient(timeout=10, limits=httpx.Limits(max_connections=4)) as client:
         with transaction(engine) as session:
+            pref = preferences(session, mode)
+            active_sports = set(pref["enabled_sports"])
+            feed_config = config.model_copy(update={"sport_rule_reviews": pref["league_rule_reviews"]})
             if mode == "demo":
                 refresh_demo(session)
             else:
@@ -79,7 +82,9 @@ async def tick(engine, config, cache):
                 last = as_utc(old["last_attempt"]) if old.get("last_attempt") else None
                 month = now.strftime("%Y-%m")
                 spent = old.get("budget_spent", 0) if old.get("budget_month") == month else 0
-                if not config.odds_api_key:
+                if not active_sports:
+                    source_state(session, mode, "odds_api", status="paused", message="Enable leagues in Settings to collect odds")
+                elif not config.odds_api_key:
                     source_state(session, mode, "odds_api", status="missing_key", message="Add ODDS_API_KEY on the server to enable sportsbook data")
                 elif not last or (now-last).total_seconds() >= config.poll_seconds:
                     if spent >= config.monthly_credit_budget:
@@ -89,12 +94,12 @@ async def tick(engine, config, cache):
                         try:
                             rejected = 0
                             usage = {}
-                            for key in config.sports.split(","):
-                                if key not in SPORTS:
+                            for key, label in SPORTS.items():
+                                if label not in active_sports:
                                     continue
                                 if spent >= config.monthly_credit_budget:
                                     break
-                                quotes, invalid, usage = await collect_sportsbook(client, config, key)
+                                quotes, invalid, usage = await collect_sportsbook(client, feed_config, key)
                                 save_quotes(session, mode, quotes, provider="odds_api", sport=SPORTS[key])
                                 rejected += invalid
                                 spent += usage["last_cost"]
@@ -105,7 +110,7 @@ async def tick(engine, config, cache):
                         except ProviderError as exc:
                             source_state(session, mode, "odds_api", status="error", message=str(exc), last_attempt=now.isoformat(), budget_spent=spent, budget_month=month)
                 mappings = session.scalars(select(MarketMapping).where(MarketMapping.mode == mode)).all()
-                exemplars = {q.market_id: Quote.model_validate(q.data) for q in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == mode)).all() if q.data["book"] not in ["kalshi", "polymarket", "polymarket_us"]}
+                exemplars = {q.market_id: Quote.model_validate(q.data) for q in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == mode)).all() if q.data["book"] not in ["kalshi", "polymarket", "polymarket_us"] and q.data["sport"] in active_sports}
                 for source in ["kalshi", "polymarket_us", "polymarket", "novig"]:
                     maps = [m.data for m in mappings if m.data["source"] == source]
                     if not maps:

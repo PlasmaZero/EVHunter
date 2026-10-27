@@ -27,4 +27,4 @@ export function age(value: string) {
   const secs = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
   return secs < 60 ? `${secs}s` : secs < 3600 ? `${Math.floor(secs / 60)}m` : `${Math.floor(secs / 3600)}h`;
 }
-export const marketName = (v: string) => ({ moneyline: "Moneyline", spread: "Spread", total: "Total" }[v] || v);
+export const marketName = (v: string, profile?: { spread_label: string }) => v === "spread" && profile ? profile.spread_label : ({ moneyline: "Moneyline", spread: "Spread", total: "Total" }[v] || v);

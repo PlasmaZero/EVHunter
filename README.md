@@ -81,16 +81,18 @@ DATA_MODE=live
 ODDS_API_KEY=your-real-key
 BOOKMAKERS=fanduel,fanatics,draftkings
 POLL_SECONDS=60
-SPORTS=basketball_nba,americanfootball_nfl
+SPORTS=basketball_nba,americanfootball_nfl,baseball_mlb,icehockey_nhl
 ```
 
-Read the current full-game settlement rules for the venues you intend to compare. Then explicitly list reviewed feed books:
+Choose monitored leagues in **Settings → Sports & leagues**, then review matching settlement rules for each league and venue. `SPORTS` initializes the league selection once; saved Settings take precedence after that. Existing selections are preserved. New installations initially monitor NBA, NFL, MLB, and NHL. WNBA, NCAAB, and NCAAF can also be enabled.
+
+For the legacy NBA/NFL setup, this environment setting initializes the rule review:
 
 ```dotenv
 REVIEWED_BOOKS=fanduel,fanatics,draftkings
 ```
 
-Unreviewed feed quotes remain visible in coverage counts but cannot enter opportunity calculations. Fanatics requires a paid provider subscription. Other adapters remain available for a future expansion but are not part of the default feed. If you later add Pinnacle as a reference, its aggregated odds may be delayed.
+Unreviewed feed quotes remain visible in coverage counts but cannot enter opportunity calculations. Adding MLB, NHL, WNBA, or college leagues does not inherit NBA/NFL settlement reviews. Review each new league/venue in Settings. MLB requires attention to action/listed-pitcher, extra-innings, shortened-game, and void rules; NHL requires matching overtime/shootout treatment. The app records your review rather than verifying operator rules automatically. Fanatics requires a paid provider subscription. Other adapters remain available for a future expansion but are not part of the default feed. If you later add Pinnacle as a reference, its aggregated odds may be delayed.
 
 **Novig and ProphetX are excluded from live calculations until their fee treatment is configured.** Do not assume either is fee-free. `EXCHANGE_FEE_CONFIG` accepts reviewed profit-commission or verified zero-fee sportsbook-style returns, for example:
 
@@ -178,15 +180,24 @@ Open **Best bets** in the sidebar to rank detected +EV selections by a transpare
 
 The grade is a heuristic research-priority score, **not a win probability or a backtested prediction model**. EV, probability, and capped Kelly stakes retain their existing calculations. Cross-book agreement does not establish independent model accuracy. Retail references receive less benchmark credit than sharp/exchange references.
 
-**Edit research** saves evidence against the exact canonical market, line, and outcome, shared across offered books. Add both teams' points scored/allowed averages and game counts, matchup reasoning (including WR/CB alignment, usage, pace, rest, and scheme where relevant), and an injury/IR risk assessment. Each reviewed block requires its source URL and actual as-of time. Sources and assessments are owner-supplied; the application does not fetch or independently verify injury reports or source-page contents. No additional API or AI key is required for this version. Existing odds feeds do not supply this research.
+**Edit research** saves evidence against the exact canonical market, line, and outcome, shared across offered books. Add both teams' scoring averages and sample sizes, sport-specific matchup reasoning, and an injury/availability assessment. NBA/WNBA/NCAAB use points, pace, usage, positional defense and rotations; MLB uses runs, starting pitchers, handedness, lineups, bullpen workload and park/weather context; NHL uses goals, goalies, expected goals, special teams and line combinations; NFL/NCAAF use coverage, WR/CB alignment, line play and workload. Each reviewed block requires its source URL and actual as-of time. Sources and assessments are owner-supplied; the application does not fetch or independently verify injury reports or source-page contents. No additional API or AI key is required for this version. Existing odds feeds do not supply this research.
 
-The scoring baseline equally blends each offense's points scored with the opponent's points allowed. Its direction is evaluated against the exact handicap or total, without converting it into a win probability. At least four games per team are required for a complete review. Scoring data expires after seven days, matchup research after 24 hours, and injury research after six hours. Missing/stale/small-sample research caps the grade at 69; material injury risk caps it at 59; unresolved injury risk caps it at 49. A candidate needs a grade of at least 70, current research, no material or unresolved injury risk, and positive funded sizing. Labels are A ≥85, B ≥70, C ≥55, D <55.
+The scoring baseline equally blends scoring with the opponent's scoring allowed, using the sport's units. Its direction is evaluated against the exact spread, run line, puck line or total, without converting it into a win probability. The directional sensitivity scale is a sport-specific rubric setting, not a fitted prediction-error estimate.
 
-Demo mode includes clearly labeled fictional research examples. Live mode never inherits those examples. The new `bet_research` table is additive and is created by the existing initialization path; no existing tables or bankroll data are replaced. Research writes require the owner session and CSRF token and are recorded in the audit log. Player touchdown props still require a future props ingestion extension; this section grades the current moneyline/spread/totals feed.
+| League | Units | Minimum games/team | Statistics expiry | Matchup expiry | Availability expiry |
+| --- | --- | ---: | ---: | ---: | ---: |
+| NBA / WNBA / NCAAB | Points | 4 | 72h | 24h | 6h |
+| NFL / NCAAF | Points | 4 | 168h | 24h | 6h |
+| MLB | Runs | 10 | 72h | 12h | 3h |
+| NHL | Goals | 6 | 72h | 12h | 3h |
+
+MLB reviews also require explicit confirmation of both starting pitchers, both batting orders, and bullpen availability. NHL reviews require confirmed starting goalies and reviewed lines/scratches. Unconfirmed availability remains provisional even if the injury assessment says clear. Missing/stale/small-sample research caps the grade at 69; material injury risk caps it at 59; unresolved injury risk caps it at 49. A candidate needs a grade of at least 70, current research, no material or unresolved injury risk, and positive funded sizing. Labels are A ≥85, B ≥70, C ≥55, D <55.
+
+Demo mode includes clearly labeled fictional research examples. Live mode never inherits those examples. The new `bet_research` table is additive and is created by the existing initialization path; no existing tables or bankroll data are replaced. Research writes require the owner session and CSRF token and are recorded in the audit log. Player props across sports still require a future ingestion extension; this section grades the current moneyline/spread/totals feed.
 
 ## Pricing and matching rules
 
-Canonical identity includes event, market type, exact home spread or total line, complete outcome set, and settlement identity. The first version supports NBA full-game moneyline and verified half-point NBA/NFL spreads and totals. NFL moneylines, integer lines, player props, and ambiguous settlement cases are excluded.
+Canonical identity includes event, market type, exact home spread or total line, complete outcome set, and settlement identity. Supported leagues are NBA, NFL, MLB, NHL, WNBA, NCAAB, and NCAAF. The adapters collect full-game two-outcome moneylines, spreads/run lines/puck lines, and totals. Comparisons require reviewed matching settlement rules and half-unit handicaps/totals. NFL tie-void moneylines, whole-number lines, three-way/draw markets, player props, and ambiguous settlement cases remain excluded. MLB/NHL settlement identities distinguish extra innings and overtime/shootouts from the basketball/football conventions. This is league coverage, not support for every market offered in each sport.
 
 For mutually exclusive, exhaustive no-push outcomes with effective decimal returns `d[i]`:
 
@@ -219,8 +230,11 @@ For 30 continuous days, three populated main markets, and an explicit group of u
 | Coverage | Polling | Approximate credits/month |
 | --- | --- | ---: |
 | Two leagues | 60 seconds | 259,200 |
-| Five leagues | 60 seconds | 648,000 |
+| Four leagues | 60 seconds | 518,400 |
+| Seven leagues | 60 seconds | 907,200 |
 | Five leagues | 30 seconds | 1,296,000 |
+
+Choose leagues in Settings; pausing a league stops its sportsbook polling and mapped streams, and excludes its cached quotes from analysis. Adding leagues increases credit use. Coverage depends on provider season/market availability; off-season or empty responses may reduce usage. [Supported provider sport keys](https://the-odds-api.com/sports-odds-data/sports-apis.html).
 
 Props typically multiply usage by event and market type. The worker tracks provider quota headers and maintains a separate calendar-month collection budget. Keep a reserve for other usage of the same API key. Provider billing resets may differ from this local calendar-month cap.
 

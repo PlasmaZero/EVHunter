@@ -7,8 +7,8 @@ import httpx
 
 from .config import Config
 from .domain import Quote, as_utc, utcnow
+from .sports import LEGACY_RULE_SPORTS, SPORTS, SPORT_PROFILES
 
-SPORTS = {"basketball_nba": "NBA", "americanfootball_nfl": "NFL"}
 MARKETS = {"h2h": "moneyline", "spreads": "spread", "totals": "total"}
 
 
@@ -37,6 +37,7 @@ def parse_odds_api(events: list, config: Config, received_at=None) -> tuple[list
         sport = SPORTS.get(event.get("sport_key"))
         if not sport:
             continue
+        reviewed_for_sport = set(config.sport_rule_reviews.get(sport, [])) if sport in config.sport_rule_reviews else reviewed if sport in LEGACY_RULE_SPORTS else set()
         for book in event.get("bookmakers", []):
             for market in book.get("markets", []):
                 kind = MARKETS.get(market.get("key"))
@@ -69,10 +70,10 @@ def parse_odds_api(events: list, config: Config, received_at=None) -> tuple[list
                         selection = f"{row['name']} {float(row['point']):+g}" if kind == "spread" else f"{row['name']} {row['point']:g}" if kind == "total" else row["name"]
                         quotes.append(Quote(event_id=event["id"], sport=sport, home=event["home_team"], away=event["away_team"],
                                             starts_at=as_utc(event["commence_time"]), market=kind, line=line,
-                                            ruleset=f"{sport.lower()}-full-game-ot-no-push-v1", outcome=outcome, outcomes=outcomes,
+                                            ruleset=SPORT_PROFILES[sport]["settlement"], outcome=outcome, outcomes=outcomes,
                                             selection=selection, book=book["key"], odds=float(row["price"]), source_at=as_utc(timestamp), received_at=now,
                                             max_stake=float(row["bet_limit"]) if row.get("bet_limit") else None,
-                                            rules_verified=book["key"] in reviewed or book["key"] == "pinnacle",
+                                            rules_verified=book["key"] in reviewed_for_sport or (sport in LEGACY_RULE_SPORTS and book["key"] == "pinnacle"),
                                             fee_model=(fee.get("model", "unknown") if fee.get("reviewed_at") else "unknown") if is_exchange else "none",
                                             fee_rate=fee.get("rate", 0)))
                 except (KeyError, ValueError, StopIteration, TypeError):

@@ -24,6 +24,7 @@ from .demo import refresh_demo
 from .domain import BOOKS, Quote, as_utc, stable_id, utcnow
 from .pricing import decimal_odds, devig, kelly, money
 from .services import analyze, bankroll, preferences
+from .sports import SPORT_PROFILES, public_profiles
 from .worker import run_worker
 
 
@@ -37,6 +38,8 @@ class Login(Input):
 
 
 class Preferences(Input):
+    enabled_sports: list[str] | None = Field(default=None, max_length=7)
+    league_rule_reviews: dict[str, list[str]] | None = None
     min_ev: float = Field(ge=0, le=100)
     min_arb: float = Field(ge=0, le=100)
     devig_method: Literal["proportional", "power", "shin"]
@@ -58,6 +61,10 @@ class Preferences(Input):
 
     @model_validator(mode="after")
     def check(self):
+        if self.enabled_sports is not None and (any(s not in SPORT_PROFILES for s in self.enabled_sports) or len(self.enabled_sports) != len(set(self.enabled_sports))):
+            raise ValueError("Choose supported leagues without duplicates")
+        if self.league_rule_reviews is not None and any(s not in SPORT_PROFILES or any(b not in BOOKS for b in books) or len(books) != len(set(books)) for s, books in self.league_rule_reviews.items()):
+            raise ValueError("Choose known leagues and venues for settlement-rule reviews")
         if any(b not in BOOKS or b == "pinnacle" for b in self.allowed_books) or self.reference_book not in BOOKS:
             raise ValueError("Unknown execution venue or reference")
         if "polymarket" in self.allowed_books:
@@ -232,6 +239,8 @@ def create_app(config: Config | None = None):
             pref = preferences(session, config.data_mode)
             return {"opportunities": opportunities, "counts": counts, "bankroll": bankroll(session, config.data_mode),
                     "preferences": pref, "books": BOOKS,
+                    "sports": public_profiles(),
+                    "collection": {"poll_seconds": config.poll_seconds, "estimated_monthly_credits": round(len(pref["enabled_sports"])*3*max(1, (len(config.bookmakers.split(","))+9)//10)*86400*30/config.poll_seconds)},
                     "best_bets": rank_best_bets(session, config.data_mode, opportunities, pref),
                     "mode": config.data_mode, "as_of": utcnow().isoformat(), "streaming": config.data_mode == "live" and bool(config.stream_sources),
                     "worker": worker.data if worker else {"status": "starting"}}
@@ -243,6 +252,9 @@ def create_app(config: Config | None = None):
             rows = session.scalars(select(CurrentQuote).where(CurrentQuote.mode == config.data_mode, CurrentQuote.market_id == body.market_id)).all()
             if not rows or body.outcome not in rows[0].data["outcomes"]:
                 raise HTTPException(422, "Choose a selection from an ingested market in this workspace")
+            profile = SPORT_PROFILES.get(rows[0].data["sport"])
+            if not profile or set(body.availability_checks)-set(profile["required_checks"]):
+                raise HTTPException(422, "Availability checks must match this market's sport")
             key = f"{config.data_mode}:{research_key(body.market_id, body.outcome)}"
             row = session.get(BetResearch, key)
             now = utcnow()
@@ -314,6 +326,9 @@ def create_app(config: Config | None = None):
             if config.data_mode == "live" and (set(body.allowed_books)-set(prior["allowed_books"]) or body.jurisdiction != prior["jurisdiction"]) and not body.confirm_eligibility:
                 raise HTTPException(422, "Confirm venue and jurisdiction eligibility before adding execution venues")
             data = body.model_dump(exclude={"confirm_eligibility"})
+            for key in ["enabled_sports", "league_rule_reviews"]:
+                if data[key] is None:
+                    data[key] = prior[key]
             data["jurisdiction_reviewed_at"] = utcnow().isoformat() if body.confirm_eligibility else prior.get("jurisdiction_reviewed_at")
             session.get(Preference, config.data_mode).data = data
             session.add(AuditEvent(action="settings.updated", detail=f"mode={config.data_mode}"))

@@ -21,7 +21,7 @@ from .config import ROOT
 from .db import CurrentQuote, MarketMapping, transaction
 from .domain import Quote, as_utc, utcnow
 from .providers import make_prediction_quotes, polymarket_us_asks
-from .services import analyze, create_threshold_alerts, save_quotes, source_state
+from .services import analyze, create_threshold_alerts, preferences, save_quotes, source_state
 
 SOURCES = {"kalshi", "polymarket", "polymarket_us", "novig"}
 
@@ -389,8 +389,9 @@ async def supervise_streams(engine, config, cache):
             grouped = {source: {} for source in SOURCES}
             with transaction(engine) as session:
                 examples = {}
+                active_sports = set(preferences(session, "live")["enabled_sports"])
                 for row in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == "live")).all():
-                    if row.data.get("feed", "odds_api") == "odds_api":
+                    if row.data.get("feed", "odds_api") == "odds_api" and row.data["sport"] in active_sports:
                         examples[row.market_id] = Quote.model_validate(row.data)
                 maps = session.scalars(select(MarketMapping).where(MarketMapping.mode == "live")).all()
                 for row in maps:
