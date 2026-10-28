@@ -1,10 +1,26 @@
 # EVHunter
 
-A private sports-odds terminal for **positive expected value, arbitrage, fair odds, Kelly sizing, and bet tracking**.
+A private sports analysis and bet-tracking tool for **odds comparison, positive expected value research, arbitrage analysis, and optional Kelly stake suggestions**.
+
+Users place bets with their own sportsbooks or exchanges and record the results here. EVHunter provides analysis and tracking; it does not accept wagers, hold customer funds, place orders, or transfer money.
 
 Next.js + TypeScript frontend, FastAPI API and collection worker, PostgreSQL, and Redis. The local demo uses SQLite and an in-memory login limiter so you can run it without paying for data or starting infrastructure.
 
 **The default workspace is a clearly labeled synthetic demo. Demo and live quotes, settings, bets, and bankroll records are isolated. Live connection failures never fall back to invented opportunities.**
+
+## Product direction: analysis and connected tracking
+
+The current version supports a single owner, manual bet entry, manual result recording, and CSV export. Market-data connections collect prices; they do **not** import account balances, placed bets, or bet results. No sportsbook-account sync or Pikkit integration is implemented.
+
+Planned progression:
+
+1. Add CSV imports with preview, validation, original placement times, and duplicate detection. Preserve historical prices and distinguish imported records from manual entries.
+2. Add read-only account connections where a provider or approved integration supports them. Start with one venue after verifying its account-history access, permissions, and coverage; odds API keys alone do not establish that access.
+3. Store a connection ID, external bet ID, source, last sync time, and settlement revisions. Repeated syncs must update the same bet rather than duplicate it. Keep imported records separate from manually logged bets and show potential duplicates for review.
+4. Add automated result reconciliation, per-sport and per-venue P&L/ROI, and closing-line value when matched closing prices are available. Keep synced venue balances separate from the user's optional sizing budget to avoid counting profits or exposure twice.
+5. Before onboarding other users, add separate user accounts, private per-user storage, scoped credential management, and disconnect/revocation controls. The current single-owner terminal is not a multi-user service.
+
+Automatic sync is future work. Connectors should request read-only access and never submit bets or move funds. Do not present market-data source status as proof that account tracking is connected.
 
 ## Run it
 
@@ -103,7 +119,7 @@ EXCHANGE_FEE_CONFIG={"novig":{"model":"profit","rate":0.02,"reviewed_at":"YYYY-M
 
 The sample rate is not a statement about Novig's current fee schedule. Unsupported fee models must remain excluded. Prediction-contract fee schedules should use a direct, reviewed mapping instead.
 
-Restart the app after changing environment variables. Live mode starts with **zero tracked cash**. Use **Bet tracker → Deposit / withdrawal** to record your bankroll; this only updates your ledger. +EV prices can be displayed without cash, but sizing is zero and arbitrage allocations require available bankroll.
+Restart the app after changing environment variables. Live mode starts with **zero tracked cash**. Use **Bet tracker → Record budget change** to enter an optional estimate of money held at your sportsbooks. Logging bets never requires a tracked budget or sufficient recorded cash. +EV prices can be displayed without a budget, but suggested sizing is zero and dashboard arbitrage allocations require a positive tracked amount after open bets. The standalone calculators accept a hypothetical budget.
 
 ### Check the connection before looking for opportunities
 
@@ -207,7 +223,7 @@ The scoring baseline equally blends scoring with the opponent's scoring allowed,
 | MLB | Runs | 10 | 72h | 12h | 3h |
 | NHL | Goals | 6 | 72h | 12h | 3h |
 
-MLB reviews also require explicit confirmation of both starting pitchers, both batting orders, and bullpen availability. NHL reviews require confirmed starting goalies and reviewed lines/scratches. Unconfirmed availability remains provisional even if the injury assessment says clear. Missing/stale/small-sample research caps the grade at 69; material injury risk caps it at 59; unresolved injury risk caps it at 49. A candidate needs a grade of at least 70, current research, no material or unresolved injury risk, and positive funded sizing. Labels are A ≥85, B ≥70, C ≥55, D <55.
+MLB reviews also require explicit confirmation of both starting pitchers, both batting orders, and bullpen availability. NHL reviews require confirmed starting goalies and reviewed lines/scratches. Unconfirmed availability remains provisional even if the injury assessment says clear. Missing/stale/small-sample research caps the grade at 69; material injury risk caps it at 59; unresolved injury risk caps it at 49. A candidate needs a grade of at least 70, current research, and no material or unresolved injury risk. Research classification does not require a tracked budget or a positive stake suggestion. Labels are A ≥85, B ≥70, C ≥55, D <55.
 
 Demo mode includes clearly labeled fictional research examples. Live mode never inherits those examples. The new `bet_research` table is additive and is created by the existing initialization path; no existing tables or bankroll data are replaced. Research writes require the owner session and CSRF token and are recorded in the audit log. Player props across sports still require a future ingestion extension; this section grades the current moneyline/spread/totals feed.
 
@@ -235,7 +251,7 @@ full Kelly = max(0, (p * effective_decimal_return - 1) / (effective_decimal_retu
 
 Fair probabilities are estimates. Proportional devig divides implied probabilities by their sum; power solves a normalization exponent; Shin uses bracketed root-finding and rejects underround references. A fractional Kelly stake is a sizing choice, not evidence that an estimate is correct.
 
-In tracking, accepted cash stake and entry fees determine exposure. Win and loss settlements move only net profit through the ledger; deposits and withdrawals never count as betting profit. A void can refund its entry fee or retain it, according to the result you record. Linked +EV bets retain the original server probability but recompute predicted EV from the accepted odds and actual fees. Arbitrage legs are logged separately; a single leg is never presented as a completed hedge.
+In tracking, accepted cash stake and entry fees determine recorded exposure. The budget is an optional estimate, not a wallet or an authorization limit: externally placed bets and external budget changes can be recorded even if the local estimate becomes negative. Negative available amounts pause dashboard sizing; they do not prevent tracking. Win and loss settlements move only net profit through the ledger; deposits and withdrawals never count as betting profit. A void can refund its entry fee or retain it, according to the result you record. Linked +EV bets retain the original server probability but recompute predicted EV from the accepted odds and actual fees. Arbitrage legs are logged separately; a single leg is never presented as a completed hedge.
 
 ## Data frequency and cost
 
@@ -299,7 +315,7 @@ npm audit --omit=dev --audit-level=high
 .venv/bin/python -m pytest backend/tests -q
 ```
 
-GitHub Actions also supplies real PostgreSQL and Redis services for an integration test covering concurrent first boot, atomic bankroll reservation, monetary settlement, and login throttling. Local tests skip that integration case unless `TEST_DATABASE_URL` and `TEST_REDIS_URL` point to dedicated test services. The integration test creates and removes an isolated schema.
+GitHub Actions also supplies real PostgreSQL and Redis services for an integration test covering concurrent first boot, concurrent bet tracking, idempotent monetary settlement, and login throttling. Local tests skip that integration case unless `TEST_DATABASE_URL` and `TEST_REDIS_URL` point to dedicated test services. The integration test creates and removes an isolated schema.
 
 Tests cover fair-probability normalization, Shin's binary behavior, cent and contract rounding, fees that erase an apparent arbitrage, incomplete/mismatched outcomes, limits, stale data, complementary order books, authentication, CSRF, immutable prediction snapshots, bankroll accounting, idempotent settlement, and demo/live separation.
 

@@ -372,12 +372,11 @@ def create_app(config: Config | None = None):
     @app.post("/api/bets", dependencies=[Depends(require_owner)], status_code=201)
     def add_bet(body: BetInput):
         if body.book not in BOOKS or body.book == "pinnacle":
-            raise HTTPException(422, "Choose an execution venue")
+            raise HTTPException(422, "Choose the venue where the bet was placed")
         with transaction(app.state.engine) as session:
             lock_owner(session, config.data_mode)
             total = round(body.stake+body.entry_fee, 2)
-            if total <= 0 or total > bankroll(session, config.data_mode)["available"]:
-                raise HTTPException(422, "Stake and entry fee exceed available bankroll")
+            # This records a bet already placed elsewhere; the tracked budget is optional.
             if body.win_fee >= body.stake*body.odds:
                 raise HTTPException(422, "Win fee must be less than the payout")
             snapshot, p = None, body.probability
@@ -442,8 +441,7 @@ def create_app(config: Config | None = None):
             amount = round(body.amount, 2)
             if amount <= 0:
                 raise HTTPException(422, "Amount must be at least one cent")
-            if body.kind == "withdrawal" and amount > bankroll(session, config.data_mode)["available"]:
-                raise HTTPException(422, "Withdrawal exceeds available cash")
+            # Record external cash changes even when the local ledger is incomplete.
             session.add(Ledger(id=secrets.token_hex(16), mode=config.data_mode, at=utcnow(), amount=amount if body.kind == "deposit" else -amount, kind=body.kind, note=body.note or body.kind.title()))
             session.flush()
             return bankroll(session, config.data_mode)

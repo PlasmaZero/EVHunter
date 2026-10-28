@@ -68,11 +68,41 @@ def test_void_entry_fee_policy(owner):
     assert owner.post(f"/api/bets/{b['id']}/settle", json={"status": "void", "refund_entry_fee": False}).json()["profit"] == -2
 
 
-def test_cannot_overspend_or_withdraw_reserved_cash(owner):
-    available = owner.get("/api/bets").json()["summary"]["available"]
-    assert owner.post("/api/bets", json=bet_payload(stake=available+1)).status_code == 422
-    assert owner.post("/api/bets", json=bet_payload(stake=available)).status_code == 201
-    assert owner.post("/api/bankroll", json={"kind": "withdrawal", "amount": 1}).status_code == 422
+def test_tracking_is_not_limited_by_the_recorded_budget(owner):
+    before = owner.get("/api/bets").json()["summary"]
+    stake = before["available"] + 100
+    logged = owner.post("/api/bets", json=bet_payload(stake=stake, entry_fee=1))
+    assert logged.status_code == 201
+    assert owner.post("/api/bankroll", json={"kind": "withdrawal", "amount": 25}).status_code == 201
+    tracked = owner.get("/api/bets").json()["summary"]
+    assert tracked["available"] == -126
+    assert tracked["exposure"] == stake + 1
+    assert tracked["profit"] == before["profit"]
+    signals = owner.get("/api/dashboard").json()["opportunities"]
+    assert signals and all(op["type"] == "ev" and op["stake"] == 0 for op in signals)
+    settled = owner.post(f"/api/bets/{logged.json()['id']}/settle", json={"status": "lost"})
+    assert settled.status_code == 200
+    after = owner.get("/api/bets").json()["summary"]
+    assert after["exposure"] == before["exposure"]
+    assert after["bankroll"] == before["bankroll"] - 25 - stake - 1
+    assert after["profit"] == before["profit"] - stake - 1
+
+
+def test_live_bet_logging_works_without_setting_a_budget(config):
+    with TestClient(create_app(config.model_copy(update={"data_mode": "live"}))) as live:
+        login = live.post("/api/auth/login", json={"username": "daniel", "password": "evhunter-demo-2026"})
+        live.headers["X-CSRF-Token"] = login.json()["csrf"]
+        logged = live.post("/api/bets", json=bet_payload())
+        assert logged.status_code == 201
+        summary = live.get("/api/bets").json()["summary"]
+        assert summary["bankroll"] == 0
+        assert summary["available"] == -100
+        assert summary["exposure"] == 100
+        assert summary["profit"] == 0
+        assert live.post(f"/api/bets/{logged.json()['id']}/settle", json={"status": "won"}).json()["profit"] == 91
+        summary = live.get("/api/bets").json()["summary"]
+        assert summary["exposure"] == 0
+        assert summary["bankroll"] == summary["profit"] == 91
 
 
 def test_deposits_are_not_profit(owner):

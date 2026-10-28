@@ -21,8 +21,9 @@ export default function Sources() {
   const [sources, setSources] = useState<SourceData | null>(null), [error, setError] = useState(""), [mapping, setMapping] = useState(false), [retrying, setRetrying] = useState(false);
   const load = useCallback(async () => { try { setSources(await api<SourceData>("/sources")); setError(""); } catch (e) { setError((e as Error).message); } }, []);
   useEffect(() => { void load(); const t = setInterval(load, 10000); return () => clearInterval(t); }, [load]);
-  return <><div className="page-heading"><div><div className="eyebrow"><span className="tiny-square" />THE INPUTS BEHIND YOUR EDGE</div><h1>Connected to the market<span className="heading-dot">.</span></h1><p>Source health, coverage, and the contracts you have actually verified.</p></div><button className="button primary" onClick={() => setMapping(true)}><Plus size={15} />Map a market</button></div>
+  return <><div className="page-heading"><div><div className="eyebrow"><span className="tiny-square" />THE INPUTS BEHIND YOUR EDGE</div><h1>Connected to the market<span className="heading-dot">.</span></h1><p>Market-data source health, coverage, and the contracts you have actually verified.</p></div><button className="button primary" onClick={() => setMapping(true)}><Plus size={15} />Map a market</button></div>
     {data.mode === "demo" && <div className="demo-banner"><div className="demo-icon"><FlaskConical size={16} /></div><div><strong>Demo mode is active.</strong><span>All displayed odds and history are synthetic. Live connections require server configuration.</span></div><a href="https://github.com/PlasmaZero/EVHunter#live-data" target="_blank" rel="noreferrer">Setup guide <ArrowUpRight size={14} /></a></div>}
+    <div className="inline-note"><Info size={15} />These connections provide market prices. Bet history and account balances are tracked manually today. Read-only account sync is planned.</div>
     <ErrorMessage text={error} />
     <section className="panel settings-panel">
       <div className="panel-heading"><div><h3>Connection setup</h3><p>Credentials stay on your server. This page shows configuration status only.</p></div>
