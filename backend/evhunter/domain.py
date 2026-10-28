@@ -17,8 +17,8 @@ BOOKS = {
     "polymarket": {"name": "Polymarket Intl.", "short": "PM", "color": "#768cff", "kind": "Prediction market"},
     "pinnacle": {"name": "Pinnacle", "short": "PN", "color": "#f19051", "kind": "Reference"},
 }
-EXECUTION_BOOKS = [b for b in BOOKS if b != "pinnacle" and b != "polymarket"]
-DEFAULT_EXECUTION_BOOKS = ["fanduel", "fanatics", "draftkings"]
+EXECUTION_BOOKS = [b for b in BOOKS if b not in {"pinnacle", "polymarket", "fanatics"}]
+DEFAULT_EXECUTION_BOOKS = ["fanduel", "draftkings"]
 
 
 def utcnow() -> datetime:

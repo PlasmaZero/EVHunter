@@ -13,6 +13,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 from sqlalchemy import select
 from websockets.asyncio.client import connect
@@ -37,6 +38,13 @@ def key_from_file(filename):
     return serialization.load_pem_private_key(path.read_bytes(), password=None)
 
 
+def signing_key(source, config):
+    inline = getattr(config, f"{source}_private_key")
+    if inline:
+        return serialization.load_pem_private_key(inline.replace("\\n", "\n").encode(), password=None)
+    return key_from_file(getattr(config, f"{source}_private_key_path"))
+
+
 def signing_headers(source, config, timestamp=None):
     timestamp = str(timestamp or int(time.time()*1000))
     if source == "polymarket_us":
@@ -46,7 +54,7 @@ def signing_headers(source, config, timestamp=None):
         signature = ed25519.Ed25519PrivateKey.from_private_bytes(raw[:32]).sign(f"{timestamp}GET/v1/ws/markets".encode())
         return {"X-PM-Access-Key": config.polymarket_us_key_id, "X-PM-Timestamp": timestamp, "X-PM-Signature": base64.b64encode(signature).decode()}
     if source == "kalshi":
-        key = key_from_file(config.kalshi_private_key_path)
+        key = signing_key(source, config)
         message = f"{timestamp}GET/trade-api/ws/v2".encode()
         if isinstance(key, ed25519.Ed25519PrivateKey):
             signature = key.sign(message)
@@ -56,7 +64,7 @@ def signing_headers(source, config, timestamp=None):
             raise ValueError("Unsupported Kalshi key type")
         return {"KALSHI-ACCESS-KEY": config.kalshi_api_key_id, "KALSHI-ACCESS-TIMESTAMP": timestamp, "KALSHI-ACCESS-SIGNATURE": base64.b64encode(signature).decode()}
     if source == "novig":
-        key = key_from_file(config.novig_private_key_path)
+        key = signing_key(source, config)
         message = f"NOVIG-V3\n{timestamp}\nGET\n/v3/ws\n\n{hashlib.sha256(b'').hexdigest()}".encode()
         if isinstance(key, ed25519.Ed25519PrivateKey):
             signature = key.sign(message)
@@ -70,9 +78,25 @@ def signing_headers(source, config, timestamp=None):
 
 def credentials_ready(source, config):
     return (source == "polymarket" or
-            source == "kalshi" and bool(config.kalshi_api_key_id and config.kalshi_private_key_path) or
+            source == "kalshi" and bool(config.kalshi_api_key_id and (config.kalshi_private_key_path or config.kalshi_private_key)) or
             source == "polymarket_us" and bool(config.polymarket_us_key_id and config.polymarket_us_secret_key) or
-            source == "novig" and bool(config.novig_key_id and config.novig_private_key_path))
+            source == "novig" and bool(config.novig_key_id and (config.novig_private_key_path or config.novig_private_key)))
+
+
+def credential_status(source, config):
+    """Local validation only. Never return key IDs, paths, values, or signatures."""
+    if source == "polymarket":
+        return {"status": "public", "message": "Public market data needs no API key; international trading keys are not used."}
+    if not credentials_ready(source, config):
+        message = "Set POLYMARKET_US_KEY_ID and POLYMARKET_US_SECRET_KEY (US Ed25519 credentials)." if source == "polymarket_us" else f"Set {source.upper()}_API_KEY_ID and {source.upper()}_PRIVATE_KEY_PATH or {source.upper()}_PRIVATE_KEY."
+        if source == "novig":
+            message = "Set NOVIG_KEY_ID and NOVIG_PRIVATE_KEY_PATH or NOVIG_PRIVATE_KEY using a trading::read key."
+        return {"status": "missing", "message": message}
+    try:
+        signing_headers(source, config)
+    except (OSError, ValueError, TypeError, UnsupportedAlgorithm):
+        return {"status": "invalid", "message": "Signing credential could not be loaded. Check the server PEM file or inline PEM." if source != "polymarket_us" else "Use a Polymarket US base64 Ed25519 secret, not an international CLOB API secret."}
+    return {"status": "configured", "message": "Credentials load locally. Provider authentication is verified when a reviewed market connects."}
 
 
 def stamp_from_millis(value):
@@ -224,11 +248,19 @@ class NovigBook:
             if not mapping:
                 continue
             if "lifecycle" in data:
-                lifecycle_seq = int(data["lifecycle"]["seq"])
+                lifecycle = data["lifecycle"]
+                lifecycle_seq = int(lifecycle["seq"])
                 if not snapshot and lifecycle_seq != self.lifecycle_seq.get(identifier, -1)+1:
                     raise StreamGap("Novig lifecycle sequence gap")
                 self.lifecycle_seq[identifier] = lifecycle_seq
-                self.open[identifier] = data["lifecycle"].get("status") == "OPEN"
+                if "status" in lifecycle:
+                    self.open[identifier] = lifecycle["status"] == "OPEN"
+                # Novig snapshots carry status; deltas carry transition names.
+                for transition in lifecycle.get("deltas", []):
+                    if transition == "OPEN":
+                        self.open[identifier] = True
+                    elif transition in {"CLOSE", "GRADE", "START", "END", "GOLIVE", "UNLIVE"}:
+                        self.open[identifier] = False
             if "book" in data:
                 book = data["book"]
                 seq = int(book["seq"])
@@ -250,6 +282,7 @@ class NovigBook:
                             raise StreamGap("Unknown Novig delta")
             at = stamp_from_millis(frame["ts"])
             if not self.open.get(identifier, False):
+                self.orders[identifier] = {}
                 updates.append(BookUpdate(identifier, ([], []), at))
                 continue
             ladders = []
@@ -328,7 +361,7 @@ async def stream_source(engine, config, cache, source, targets):
             if source == "kalshi":
                 decoder, subscription = KalshiBook(), {"id": 1, "cmd": "subscribe", "params": {"channels": ["orderbook_delta"], "market_tickers": list(targets)}}
             elif source == "polymarket":
-                decoder, subscription = PolymarketBook(mappings), {"type": "market", "assets_ids": list({t for m in mappings for t in m["token_ids"]})}
+                decoder, subscription = PolymarketBook(mappings), {"type": "market", "assets_ids": list({t for m in mappings for t in m["token_ids"]}), "custom_feature_enabled": True}
             elif source == "novig":
                 decoder, subscription = NovigBook(mappings), {"nonce": 1, "subscribe": {"markets": {identifier: "book" for identifier in targets}}}
             else:
@@ -368,10 +401,18 @@ async def stream_source(engine, config, cache, source, targets):
                         backoff = 1
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
             # Never print exception URLs, signed headers, key material, or raw frames.
             invalidate(engine, cache, source, market_ids)
-            set_stream_status(engine, source, "reconnecting", message="Stream interrupted or invalid book; quotes invalidated and fresh snapshot required")
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code in {401, 403}:
+                set_stream_status(engine, source, "authentication_failed", message="Stream access rejected. Check the key pair, read permissions, and server clock.")
+                backoff = 60
+            elif status_code == 451:
+                set_stream_status(engine, source, "access_restricted", message="Provider restricted this connection. Check access requirements with the provider.")
+                backoff = 60
+            else:
+                set_stream_status(engine, source, "reconnecting", message="Stream interrupted or invalid book; quotes invalidated and fresh snapshot required")
         finally:
             if ping_task:
                 ping_task.cancel()
@@ -401,7 +442,8 @@ async def supervise_streams(engine, config, cache):
                         grouped[m["source"]].setdefault(m["external_id"], []).append((m, example))
             for source in SOURCES:
                 targets = grouped[source]
-                reason = "disabled" if source not in enabled else "needs_mapping" if not targets else "credentials_required" if not credentials_ready(source, config) else None
+                credential = credential_status(source, config)
+                reason = "disabled" if source not in enabled else "credentials_required" if credential["status"] == "missing" else "invalid_credentials" if credential["status"] == "invalid" else "needs_mapping" if not targets else None
                 fingerprint = json.dumps([(m, q.event_id, q.starts_at.isoformat(), q.ruleset) for pairs in targets.values() for m, q in pairs], sort_keys=True) if reason is None else reason
                 if fingerprint == fingerprints.get(source) and source in tasks and not tasks[source].done():
                     continue
@@ -412,7 +454,7 @@ async def supervise_streams(engine, config, cache):
                     invalidate(engine, cache, source, previous_ids.get(source, []))
                 fingerprints[source] = fingerprint
                 if reason:
-                    messages = {"disabled": "Streaming not enabled", "needs_mapping": "Add reviewed mappings to ingested markets first", "credentials_required": "Add the account's API key and signing credential on the server"}
+                    messages = {"disabled": "Streaming not enabled; set PREDICTION_STREAMS=auto to use configured credentials", "needs_mapping": "Add reviewed mappings to ingested markets first", "credentials_required": credential["message"], "invalid_credentials": credential["message"]}
                     set_stream_status(engine, source, reason, message=messages[reason])
                 else:
                     previous_ids[source] = [m["market_id"] for pairs in targets.values() for m, _ in pairs]

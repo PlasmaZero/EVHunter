@@ -25,6 +25,7 @@ from .domain import BOOKS, Quote, as_utc, stable_id, utcnow
 from .pricing import decimal_odds, devig, kelly, money
 from .services import analyze, bankroll, preferences
 from .sports import SPORT_PROFILES, public_profiles
+from .streams import credential_status
 from .worker import run_worker
 
 
@@ -69,6 +70,8 @@ class Preferences(Input):
             raise ValueError("Unknown execution venue or reference")
         if "polymarket" in self.allowed_books:
             raise ValueError("International Polymarket is reference-only in this US MVP")
+        if "fanatics" in self.allowed_books or self.reference_book == "fanatics":
+            raise ValueError("Fanatics has been removed from the active feed. Use FanDuel or DraftKings.")
         if self.email and not re.fullmatch(r"[^\s@\r\n]+@[^\s@\r\n]+\.[^\s@\r\n]+", self.email):
             raise ValueError("Provide a valid email address")
         if self.email_alerts and not self.email:
@@ -452,10 +455,24 @@ def create_app(config: Config | None = None):
             rows = session.scalars(select(CurrentQuote).where(CurrentQuote.mode == config.data_mode)).all()
             counts = {b: sum(q.data["book"] == b for q in rows) for b in BOOKS}
             maps = [{"id": m.id, **m.data} for m in session.scalars(select(MarketMapping).where(MarketMapping.mode == config.data_mode)).all()]
+            setup = {"odds_api": {"status": "configured" if config.odds_api_key else "missing", "enabled": config.data_mode == "live",
+                                  "message": "ODDS_API_KEY is set on the server." if config.odds_api_key else "Add ODDS_API_KEY to the server environment.", "mapping_count": 0}}
+            for source in ["novig", "kalshi", "polymarket_us", "polymarket"]:
+                setup[source] = {**credential_status(source, config), "enabled": source in config.stream_sources,
+                                 "mapping_count": sum(m["source"] == source for m in maps)}
             return {"mode": config.data_mode, "states": states, "books": BOOKS, "quote_counts": counts, "mappings": maps,
                     "poll_seconds": config.poll_seconds, "prediction_poll_seconds": config.prediction_poll_seconds,
                     "monthly_credit_budget": config.monthly_credit_budget, "smtp_configured": bool(config.smtp_host),
-                    "reviewed_books": config.reviewed_books.split(","), "stream_sources": config.stream_sources}
+                    "reviewed_books": config.reviewed_books.split(","), "stream_sources": config.stream_sources, "setup": setup,
+                    "configured_books": config.bookmakers.split(","), "enabled_sports": preferences(session, config.data_mode)["enabled_sports"]}
+
+    @app.post("/api/sources/retry", dependencies=[Depends(require_owner)])
+    def retry_sources():
+        with transaction(app.state.engine) as session:
+            row = session.get(SourceState, f"{config.data_mode}:odds_api")
+            if row:
+                row.data = {**row.data, "last_attempt": None, "retry_at": None}
+        return {"scheduled": config.data_mode == "live", "message": "The collector will retry on its next cycle. Local and provider credit limits still apply."}
 
     @app.get("/api/markets", dependencies=[Depends(require_owner)])
     def markets():

@@ -13,7 +13,10 @@ MARKETS = {"h2h": "moneyline", "spreads": "spread", "totals": "total"}
 
 
 class ProviderError(Exception):
-    pass
+    def __init__(self, message, *, status="error", retry_after=0):
+        super().__init__(message)
+        self.status = status
+        self.retry_after = retry_after
 
 
 async def request_json(client, url, **kwargs):
@@ -23,7 +26,22 @@ async def request_json(client, url, **kwargs):
         return response.json(), response.headers
     except httpx.HTTPStatusError as exc:
         # Exception strings include request URLs and can expose API keys. Never log them.
-        raise ProviderError(f"Provider returned HTTP {exc.response.status_code}") from None
+        response = exc.response
+        try:
+            code = response.json().get("error_code", "")
+        except (ValueError, AttributeError):
+            code = ""
+        if code == "OUT_OF_USAGE_CREDITS" or response.status_code == 402:
+            raise ProviderError("Provider credits exhausted. Check your plan or wait for its quota reset.", status="quota_exhausted", retry_after=3600) from None
+        if response.status_code in {401, 403}:
+            raise ProviderError("Provider rejected access. Check the server API key, its permissions, and plan coverage.", status="authentication_failed", retry_after=300) from None
+        if response.status_code == 429:
+            try:
+                delay = min(3600, max(30, int(response.headers.get("retry-after", "60"))))
+            except ValueError:
+                delay = 60
+            raise ProviderError("Provider rate limit reached. Collection will retry after the cooldown.", status="rate_limited", retry_after=delay) from None
+        raise ProviderError(f"Provider returned HTTP {response.status_code}") from None
     except (httpx.RequestError, ValueError):
         raise ProviderError("Provider is unreachable or returned invalid JSON") from None
 
@@ -88,7 +106,11 @@ async def collect_sportsbook(client, config, sport_key):
     if not isinstance(data, list):
         raise ProviderError("Unexpected odds response schema")
     quotes, rejected = parse_odds_api(data, config)
-    return quotes, rejected, {"credits_remaining": headers.get("x-requests-remaining"), "credits_used": headers.get("x-requests-used"), "last_cost": int(headers.get("x-requests-last", 3))}
+    try:
+        cost = max(0, int(headers.get("x-requests-last", 3)))
+    except (TypeError, ValueError):
+        cost = 3
+    return quotes, rejected, {"credits_remaining": headers.get("x-requests-remaining"), "credits_used": headers.get("x-requests-used"), "last_cost": cost}
 
 
 def kalshi_asks(book: dict) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:

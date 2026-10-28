@@ -6,6 +6,7 @@ import smtplib
 import ssl
 import time
 from contextlib import suppress
+from datetime import timedelta
 from email.message import EmailMessage
 
 import httpx
@@ -82,33 +83,42 @@ async def tick(engine, config, cache):
                 last = as_utc(old["last_attempt"]) if old.get("last_attempt") else None
                 month = now.strftime("%Y-%m")
                 spent = old.get("budget_spent", 0) if old.get("budget_month") == month else 0
+                retry_at = as_utc(old["retry_at"]) if old.get("retry_at") else None
                 if not active_sports:
                     source_state(session, mode, "odds_api", status="paused", message="Enable leagues in Settings to collect odds")
                 elif not config.odds_api_key:
                     source_state(session, mode, "odds_api", status="missing_key", message="Add ODDS_API_KEY on the server to enable sportsbook data")
-                elif not last or (now-last).total_seconds() >= config.poll_seconds:
+                elif (not retry_at or now >= retry_at) and (not last or (now-last).total_seconds() >= config.poll_seconds):
                     if spent >= config.monthly_credit_budget:
                         source_state(session, mode, "odds_api", status="budget_paused", message="Calendar-month credit budget reached")
                     else:
                         started = time.monotonic()
                         try:
                             rejected = 0
+                            collected_count = 0
+                            budget_paused = False
                             usage = {}
+                            request_cost = 3 * max(1, (len(config.bookmakers.split(","))+9)//10)
                             for key, label in SPORTS.items():
                                 if label not in active_sports:
                                     continue
-                                if spent >= config.monthly_credit_budget:
+                                if spent + request_cost > config.monthly_credit_budget:
+                                    budget_paused = True
                                     break
                                 quotes, invalid, usage = await collect_sportsbook(client, feed_config, key)
                                 save_quotes(session, mode, quotes, provider="odds_api", sport=SPORTS[key])
                                 rejected += invalid
+                                collected_count += len(quotes)
                                 spent += usage["last_cost"]
                                 await asyncio.sleep(.1)
-                            source_state(session, mode, "odds_api", status="connected", message=f"Pregame feed · {rejected} invalid selections excluded",
-                                         last_attempt=now.isoformat(), last_success=now.isoformat(), latency_ms=round((time.monotonic()-started)*1000),
+                            status = "budget_paused" if budget_paused else "connected" if collected_count else "no_data"
+                            message = "Not enough local credit budget for another request. Adjust MONTHLY_CREDIT_BUDGET for your plan." if budget_paused else f"{collected_count} selections collected · {rejected} invalid selections excluded" if collected_count else "API responded successfully but returned no supported selections. Check enabled leagues and bookmaker coverage."
+                            source_state(session, mode, "odds_api", status=status, message=message, retry_at=None,
+                                         last_attempt=now.isoformat(), **({"last_success": now.isoformat()} if usage else {}), latency_ms=round((time.monotonic()-started)*1000),
                                          budget_spent=spent, budget_month=month, **usage)
                         except ProviderError as exc:
-                            source_state(session, mode, "odds_api", status="error", message=str(exc), last_attempt=now.isoformat(), budget_spent=spent, budget_month=month)
+                            source_state(session, mode, "odds_api", status=exc.status, message=str(exc), last_attempt=now.isoformat(),
+                                         retry_at=(now+timedelta(seconds=max(config.poll_seconds, exc.retry_after))).isoformat(), budget_spent=spent, budget_month=month)
                 mappings = session.scalars(select(MarketMapping).where(MarketMapping.mode == mode)).all()
                 exemplars = {q.market_id: Quote.model_validate(q.data) for q in session.scalars(select(CurrentQuote).where(CurrentQuote.mode == mode)).all() if q.data["book"] not in ["kalshi", "polymarket", "polymarket_us"] and q.data["sport"] in active_sports}
                 for source in ["kalshi", "polymarket_us", "polymarket", "novig"]:
