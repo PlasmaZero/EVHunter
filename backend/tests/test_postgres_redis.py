@@ -15,7 +15,7 @@ from evhunter.db import Ledger, initialize, make_engine, transaction
 
 
 @pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL") or not os.getenv("TEST_REDIS_URL"), reason="Requires PostgreSQL and Redis (provided by CI)")
-def test_postgres_startup_lock_concurrent_bankroll_and_redis():
+def test_postgres_startup_lock_concurrent_tracking_and_redis():
     url = os.environ["TEST_DATABASE_URL"]
     admin = create_engine(url)
     schema = "evhunter_test_"+secrets.token_hex(6)
@@ -42,10 +42,12 @@ def test_postgres_startup_lock_concurrent_bankroll_and_redis():
             payload = {"event": "A @ B", "selection": "A", "book": "fanduel", "stake": 80, "odds": 1.91}
             with ThreadPoolExecutor(max_workers=2) as pool:
                 codes = list(pool.map(lambda _: client.post("/api/bets", json=payload).status_code, range(2)))
-            assert sorted(codes) == [201, 422]
-            assert client.get("/api/bets").json()["summary"]["available"] == 20
+            assert codes == [201, 201]
+            assert client.get("/api/bets").json()["summary"]["available"] == -60
             bet = client.get("/api/bets").json()["bets"][0]
-            assert client.post(f"/api/bets/{bet['id']}/settle", json={"status": "won"}).json()["profit"] == 72.8
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                profits = list(pool.map(lambda _: client.post(f"/api/bets/{bet['id']}/settle", json={"status": "won"}).json()["profit"], range(2)))
+            assert profits == [72.8, 72.8]
             assert client.get("/api/bets").json()["summary"]["bankroll"] == 172.8
     finally:
         engine.dispose()

@@ -226,7 +226,7 @@ def grade_bet(op, pref, research=None, now=None):
     if not op["size_verified"]:
         risks.append("Venue acceptance size is unverified.")
     if op["stake"] <= 0:
-        risks.append("No funded stake: record bankroll or review stake constraints.")
+        risks.append("No stake estimate: enter an optional tracked budget or review sizing constraints. Research grading remains available.")
     factor("execution", "Freshness & execution", fresh_points+(5 if op["size_verified"] else 1), execution_reasons)
 
     complete = stats_ok and matchup_ok and injury_ok and not small_sample
@@ -234,7 +234,7 @@ def grade_bet(op, pref, research=None, now=None):
         caps.append({"maximum": 69, "reason": "Incomplete, stale, or small-sample research"})
     raw = round(sum(f["points"] for f in factors))
     score = max(0, min([raw, *[c["maximum"] for c in caps]]))
-    candidate = complete and injury_status not in {"material", "unresolved"} and op["stake"] > 0 and score >= 70
+    candidate = complete and injury_status not in {"material", "unresolved"} and score >= 70
     state = "candidate" if candidate else "provisional" if not complete else "watch"
     letter = "A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D"
     return {

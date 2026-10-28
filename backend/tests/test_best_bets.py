@@ -65,11 +65,15 @@ def test_stale_injury_report_loses_points_and_becomes_provisional():
     assert grade_bet(opportunity(), default_preferences("live"), r)["score"] <= 49
 
 
-def test_small_samples_cannot_qualify_and_bankroll_zero_does_not_suggest_action():
+def test_research_quality_determines_candidates_independently_of_budget():
     r = research()
     r["scoring"]["home_games"] = 2
     assert grade_bet(opportunity(), default_preferences("live"), r)["state"] == "provisional"
-    assert grade_bet(opportunity(stake=0), default_preferences("live"), research())["state"] == "watch"
+    op = opportunity(stake=0)
+    graded = grade_bet(op, default_preferences("live"), research())
+    assert graded["state"] == "candidate"
+    assert graded["score"] == grade_bet(opportunity(), default_preferences("live"), research())["score"]
+    assert op["stake"] == 0  # Grading does not create a stake suggestion without a budget.
 
 
 @pytest.mark.parametrize("market,line,outcome,cushion", [

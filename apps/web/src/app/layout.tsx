@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "EVHunter — Find your edge",
-  description: "A private terminal for odds comparison, positive expected value, arbitrage, and disciplined bet tracking.",
+  description: "Sports analysis, odds comparison, positive expected value research, and tracking bets placed at your sportsbooks.",
   robots: { index: false, follow: false }
 };
 

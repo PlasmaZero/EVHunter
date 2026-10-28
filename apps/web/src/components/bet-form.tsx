@@ -21,11 +21,12 @@ export default function BetForm({ opportunity: op, onClose, onSaved }: { opportu
     e.preventDefault(); setBusy(true); setError("");
     try {
       await api("/bets", { method: "POST", body: JSON.stringify({ event, selection, book, market: op?.market || "manual", stake: Number(stake), odds: Number(odds), entry_fee: Number(entryFee), win_fee: Number(winFee), probability: probability ? Number(probability)/100 : null, snapshot_id: op?.snapshot_id || null, notes }) });
-      await refresh(); onSaved?.(); notify("Bet recorded. Bankroll exposure updated."); onClose();
+      await refresh(); onSaved?.(); notify("Bet recorded. Tracked exposure updated."); onClose();
     } catch (e) { setError((e as Error).message); } finally { setBusy(false); }
   }
-  return <Modal title="Log a bet" subtitle="Record the odds and stake you actually accepted." onClose={onClose}>
+  return <Modal title="Log a bet" subtitle="Record a bet you already placed at a sportsbook or exchange." onClose={onClose}>
     <form onSubmit={submit} className="modal-body form-stack">
+      <div className="inline-note"><Info size={15} />Manual tracking works without setting a bankroll. Enter the stake and odds confirmed by your venue.</div>
       {data.mode === "demo" && <div className="inline-note"><Info size={15} />This entry belongs to your separate demo bankroll.</div>}
       {op?.type === "arb" && <Field label="Arbitrage leg" hint="Log each accepted leg separately. A single leg does not lock in the arbitrage."><select value={leg} onChange={e => { const i = Number(e.target.value), l = op.legs[i]; setLeg(i); setSelection(l.selection); setBook(l.book); setStake(l.stake.toFixed(2)); setOdds(l.odds.toFixed(4)); }}>{op.legs.map((l, i) => <option key={i} value={i}>{l.selection} · {data.books[l.book].name}</option>)}</select></Field>}
       <Field label="Event"><input required readOnly={!!op} maxLength={180} value={event} onChange={e => setEvent(e.target.value)} placeholder="Boston Celtics @ New York Knicks" /></Field>
