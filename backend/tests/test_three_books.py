@@ -50,6 +50,6 @@ def test_existing_preferences_migrate_once_without_changing_cash(owner):
     assert owner.get("/api/bets").json()["summary"] == before
     with transaction(engine) as session:
         pref = session.get(Preference, "demo")
-        pref.data = {**pref.data, "reference_book": "fanatics"}
+        pref.data = {**pref.data, "reference_book": "fanduel"}
     initialize(engine, config)
-    assert owner.get("/api/settings").json()["reference_book"] == "fanatics"
+    assert owner.get("/api/settings").json()["reference_book"] == "fanduel"

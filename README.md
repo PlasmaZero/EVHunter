@@ -68,9 +68,9 @@ The app reads market data and records bets you have already placed. It does not 
 
 ### 1. Configure the sportsbook feed
 
-The default feed and execution venues are **FanDuel, Fanatics, and DraftKings only**. DraftKings is the initial reference for estimating +EV at FanDuel and Fanatics; it is still included in arbitrage comparisons. This uses a retail pricing proxy, so it does not establish an independently validated probability. Change the reference in Settings when you have another supported benchmark.
+The default sportsbook feed and execution venues are **FanDuel and DraftKings**. DraftKings is the initial reference for estimating +EV at FanDuel; it is still included in arbitrage comparisons. This uses a retail pricing proxy, so it does not establish an independently validated probability. Change the reference in Settings when you have another supported benchmark.
 
-For an existing checkout, run `git pull`, change `BOOKMAKERS` in your existing `.env` to `fanduel,fanatics,draftkings`, and restart. The one-time preference update narrows the selected execution books and chooses DraftKings as the reference without changing bets or bankroll records.
+For an existing checkout, run `git pull` and restart. The feed removes Fanatics from old `BOOKMAKERS` values. A one-time migration removes Fanatics from saved execution and rule-review lists, preserving other venues, strategy settings, bets, and bankroll records. A Fanatics reference is changed to DraftKings.
 
 Get an API key from [The Odds API](https://the-odds-api.com/). Its paid coverage currently lists FanDuel, DraftKings, BetMGM, Fanatics, Caesars, Novig, ProphetX, and Pinnacle. Coverage varies by sport and market. API access and data-use rights are governed by the provider agreement.
 
@@ -79,7 +79,7 @@ In your **untracked** `.env`:
 ```dotenv
 DATA_MODE=live
 ODDS_API_KEY=your-real-key
-BOOKMAKERS=fanduel,fanatics,draftkings
+BOOKMAKERS=fanduel,draftkings
 POLL_SECONDS=60
 SPORTS=basketball_nba,americanfootball_nfl,baseball_mlb,icehockey_nhl
 ```
@@ -89,10 +89,10 @@ Choose monitored leagues in **Settings → Sports & leagues**, then review match
 For the legacy NBA/NFL setup, this environment setting initializes the rule review:
 
 ```dotenv
-REVIEWED_BOOKS=fanduel,fanatics,draftkings
+REVIEWED_BOOKS=fanduel,draftkings
 ```
 
-Unreviewed feed quotes remain visible in coverage counts but cannot enter opportunity calculations. Adding MLB, NHL, WNBA, or college leagues does not inherit NBA/NFL settlement reviews. Review each new league/venue in Settings. MLB requires attention to action/listed-pitcher, extra-innings, shortened-game, and void rules; NHL requires matching overtime/shootout treatment. The app records your review rather than verifying operator rules automatically. Fanatics requires a paid provider subscription. Other adapters remain available for a future expansion but are not part of the default feed. If you later add Pinnacle as a reference, its aggregated odds may be delayed.
+Unreviewed feed quotes remain visible in coverage counts but cannot enter opportunity calculations. Adding MLB, NHL, WNBA, or college leagues does not inherit NBA/NFL settlement reviews. Review each new league/venue in Settings. MLB requires attention to action/listed-pitcher, extra-innings, shortened-game, and void rules; NHL requires matching overtime/shootout treatment. The app records your review rather than verifying operator rules automatically. Fanatics has been removed from the active feed and default selectors. Other adapters remain available for a future expansion but are not part of the default feed. If you later add Pinnacle as a reference, its aggregated odds may be delayed.
 
 **Novig and ProphetX are excluded from live calculations until their fee treatment is configured.** Do not assume either is fee-free. `EXCHANGE_FEE_CONFIG` accepts reviewed profit-commission or verified zero-fee sportsbook-style returns, for example:
 
@@ -104,6 +104,20 @@ EXCHANGE_FEE_CONFIG={"novig":{"model":"profit","rate":0.02,"reviewed_at":"YYYY-M
 The sample rate is not a statement about Novig's current fee schedule. Unsupported fee models must remain excluded. Prediction-contract fee schedules should use a direct, reviewed mapping instead.
 
 Restart the app after changing environment variables. Live mode starts with **zero tracked cash**. Use **Bet tracker → Deposit / withdrawal** to record your bankroll; this only updates your ledger. +EV prices can be displayed without cash, but sizing is zero and arbitrage allocations require available bankroll.
+
+### Check the connection before looking for opportunities
+
+Open **Data sources**. Each card now reports whether credentials are missing, malformed, configured locally, or unnecessary; whether its stream is enabled; and how many reviewed contract mappings exist. No API keys, key IDs, signatures, or private-key paths are returned to the browser.
+
+- Keep `DATA_MODE=demo` for synthetic data. Set `DATA_MODE=live` and restart the API and worker when ready to use real data. Adding an odds key alone does not change workspaces.
+- `BOOKMAKERS=fanduel,draftkings` uses the free-compatible sportsbook selection. The default local calendar-month budget is **450 credits**, leaving a reserve against the provider's 500-credit free allowance. Set `MONTHLY_CREDIT_BUDGET` to fit your actual plan. An existing `.env` keeps its prior budget, so check that value on upgrade.
+- Continuous polling uses more than a free allowance. Limit monitored leagues and collection time; the Sources page displays the usage estimate, remaining provider credits when reported, and the reason collection is paused.
+- Bad keys, exhausted provider credits, rate limits, and successful responses with no supported odds have separate statuses. **Retry sportsbook feed** clears its cooldown after correcting setup; it does not override budget limits.
+- `PREDICTION_STREAMS=auto` (also the meaning of an old blank value) enables streams with complete credential pairs and public international Polymarket data. Connections open only after a reviewed mapping exists. Use `off` to disable streams, or an explicit venue list.
+- Kalshi needs its API key ID plus an RSA or Ed25519 signing PEM. Novig needs a `trading::read` key ID plus its Ed25519/P-256 signing PEM; a management-only key cannot open this stream. Mount the PEM and set its `_PRIVATE_KEY_PATH`, or use `_PRIVATE_KEY` for an inline PEM. Literal escaped newlines are accepted. Never commit keys.
+- **Polymarket US** uses `POLYMARKET_US_KEY_ID` and `POLYMARKET_US_SECRET_KEY`, a base64 Ed25519 secret. The official SDK names `POLYMARKET_KEY_ID` and `POLYMARKET_SECRET_KEY` are also accepted. International CLOB API key/secret/passphrase credentials are different and must not be placed in the US fields. International public market data needs no trading credentials.
+
+Credentials do not discover or approve matching contracts. Enable any additional execution venues in Settings, then add reviewed mappings below. Sportsbook odds must be ingested first so the exact event, line, outcomes, and settlement identity can be selected.
 
 ### 2. Map Kalshi and Polymarket contracts
 
@@ -140,13 +154,15 @@ Direct WebSocket adapters are implemented for **Kalshi, Polymarket US, Polymarke
 After pulling updates, run `npm run setup` to install the signing dependency, then configure only the sources you want:
 
 ```dotenv
-PREDICTION_STREAMS=kalshi,polymarket_us,novig
+PREDICTION_STREAMS=auto
 KALSHI_API_KEY_ID=
-KALSHI_PRIVATE_KEY_PATH=
+KALSHI_PRIVATE_KEY_PATH=secrets/kalshi.pem
+# Or KALSHI_PRIVATE_KEY with a server-side inline PEM.
 POLYMARKET_US_KEY_ID=
 POLYMARKET_US_SECRET_KEY=
 NOVIG_KEY_ID=
-NOVIG_PRIVATE_KEY_PATH=
+NOVIG_PRIVATE_KEY_PATH=secrets/novig.pem
+# Or NOVIG_PRIVATE_KEY with a server-side inline PEM.
 ```
 
 Use local paths to downloaded API signing keys, kept outside the repository. Polymarket US uses its API secret key in base64. These are service API signing credentials, never a wallet seed phrase. Keys remain on the worker and are never returned to the browser.

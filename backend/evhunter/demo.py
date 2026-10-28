@@ -77,9 +77,9 @@ def refresh_demo(session, seed_history=True):
                 wiggle = math.sin(step*.65 + len(q.outcome))*.028 + (24-step)*.0008
                 session.add(History(mode="demo", market_id=q.market_id, book=q.book, outcome=q.outcome, at=at, odds=max(1.01, q.odds+wiggle)))
         seed_bets(session, now)
-    source_state(session, "demo", "odds_api", status="demo", message="Synthetic FanDuel, Fanatics and DraftKings data", last_success=now.isoformat(), latency_ms=0, credits_used=0)
+    source_state(session, "demo", "odds_api", status="demo", message="Synthetic FanDuel and DraftKings data", last_success=now.isoformat(), latency_ms=0, credits_used=0)
     for provider in ["kalshi", "polymarket_us", "polymarket"]:
-        source_state(session, "demo", provider, status="disabled", message="Not enabled for the current three-book setup")
+        source_state(session, "demo", provider, status="disabled", message="Direct exchange feeds are available in the live workspace after configuration and mapping")
 
 
 def seed_bets(session, now):

@@ -26,3 +26,10 @@
 /* League controls and sport-specific research. */
 .league-settings{grid-column:1/-1}.league-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.league-control{padding:15px;border:1px solid var(--border);border-radius:5px}.league-control>.check-line{margin:0;font-size:12px}.league-control .check-line small{margin-left:auto;color:var(--subtle);font-size:9px}.league-control>p{font-size:10px;color:var(--muted);line-height:1.8;margin:10px 0 12px}.league-rule-books{display:flex;align-items:center;flex-wrap:wrap;gap:10px;font-size:9px;color:var(--muted)}.league-rule-books>label{display:flex;align-items:center;gap:5px}.league-rule-books input{accent-color:var(--accent)}.availability-checks{display:flex;flex-direction:column;gap:10px;padding:14px;border:1px solid var(--border);border-radius:5px}.availability-checks>span{font-size:10px;color:var(--amber);margin-bottom:2px}.availability-checks .check-line{margin:0;font-size:11px}.sport-chip.mlb{color:#93b9ef;background:#93b9ef10;border-color:#93b9ef26}.sport-chip.nhl{color:#c4b2f3;background:#c4b2f310;border-color:#c4b2f326}.sport-chip.wnba{color:#eeb38b;background:#eeb38b10;border-color:#eeb38b26}.sport-chip.ncaab,.sport-chip.ncaaf{color:#a5c9c4;background:#a5c9c410;border-color:#a5c9c426}.best-projection strong>small{font-size:9px;color:var(--muted);font-weight:400}
 @media(max-width:650px){.league-controls{grid-template-columns:1fr}.league-control{padding:12px}.league-settings{grid-column:auto}.league-control .check-line small{font-size:8px}.league-rule-books{gap:8px}}
+
+/* Server connection diagnostics contain no credential values. */
+.source-setup { margin: 12px 0; padding: 12px; border: 1px solid var(--border, #29332c); border-radius: 8px; font-size: 12px; }
+.source-setup strong { display: block; font-size: 12px; }
+.source-setup p, .source-setup small { display: block; margin-top: 6px; line-height: 1.5; overflow-wrap: anywhere; }
+.source-setup.missing, .source-setup.invalid { border-color: #87622c; }
+.source-status.quota_exhausted, .source-status.authentication_failed, .source-status.invalid_credentials, .source-status.rate_limited { color: #e9bd73; }

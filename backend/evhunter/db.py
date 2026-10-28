@@ -159,6 +159,17 @@ def initialize(engine, config: Config):
                     preference.data = {**preference.data, "allowed_books": list(DEFAULT_EXECUTION_BOOKS), "reference_book": "draftkings"}
                 session.add(SourceState(id=migration_id, data={"applied_at": utcnow().isoformat()}))
             preference = session.get(Preference, config.data_mode)
+            # Drop the paid-only default without resetting other venues,
+            # strategy settings, rule reviews, cash, or historical bets.
+            free_feed_migration = f"{config.data_mode}:free-sportsbooks-v1"
+            if not session.get(SourceState, free_feed_migration):
+                data = dict(preference.data)
+                data["allowed_books"] = [b for b in data["allowed_books"] if b != "fanatics"]
+                if data.get("reference_book") == "fanatics":
+                    data["reference_book"] = "draftkings"
+                data["league_rule_reviews"] = {s: [b for b in books if b != "fanatics"] for s, books in data.get("league_rule_reviews", {}).items()}
+                preference.data = data
+                session.add(SourceState(id=free_feed_migration, data={"applied_at": utcnow().isoformat()}))
             preference.data = {**preference.data, "enabled_sports": preference.data.get("enabled_sports", initial_sports), "league_rule_reviews": preference.data.get("league_rule_reviews", initial_reviews)}
             if not session.get(Ledger, f"{config.data_mode}:opening"):
                 session.add(Ledger(id=f"{config.data_mode}:opening", mode=config.data_mode, at=utcnow()-timedelta(days=30) if config.data_mode == "demo" else utcnow(), amount=10000 if config.data_mode == "demo" else 0, kind="deposit", note="Synthetic opening bankroll" if config.data_mode == "demo" else "Opening balance"))

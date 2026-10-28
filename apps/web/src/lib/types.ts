@@ -30,7 +30,8 @@ export type BetData = { bets: Bet[]; summary: Summary; series: { at: string; rea
 export type AlertItem = { id: string; event: string; selection: string; edge: number; type: string; created_at: string; delivery: string; read: boolean; opportunity_id: string };
 export type SourceState = { status: string; message?: string; last_success?: string; last_attempt?: string; latency_ms?: number; credits_used?: string | number; credits_remaining?: string | number; budget_spent?: number };
 export type Mapping = { id: string; market_id: string; source: string; external_id: string; yes_outcome: string; fee_model: string; fee_rate: number; reviewed_at: string };
-export type Sources = { stream_sources: string[]; mode: string; states: Record<string, SourceState>; books: Books; quote_counts: Record<string, number>; mappings: Mapping[]; poll_seconds: number; prediction_poll_seconds: number; monthly_credit_budget: number; smtp_configured: boolean; reviewed_books: string[] };
+export type SourceSetup = { status: "public" | "configured" | "missing" | "invalid"; enabled: boolean; message: string; mapping_count: number };
+export type Sources = { setup?: Record<string, SourceSetup>; configured_books?: string[]; enabled_sports?: string[]; stream_sources: string[]; mode: string; states: Record<string, SourceState>; books: Books; quote_counts: Record<string, number>; mappings: Mapping[]; poll_seconds: number; prediction_poll_seconds: number; monthly_credit_budget: number; smtp_configured: boolean; reviewed_books: string[] };
 export type Market = { id: string; event: string; market: string; line: number | null; outcomes: string[]; ruleset: string };
 
 export type ScoringAverages = { home_for: number; home_against: number; away_for: number; away_against: number; home_games: number; away_games: number; source_url: string | null; as_of: string };
